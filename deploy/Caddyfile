@@ -1,0 +1,23 @@
+# Caddy reverse proxy with automatic HTTPS (Let's Encrypt).
+# Caddy obtains + auto-renews the TLS certificate for this domain — no manual
+# cert steps. Requires ports 80 (ACME challenge) and 443 (HTTPS) open, and the
+# domain's DNS pointing at this server.
+#
+# To change the domain: edit the hostname below and `docker compose restart caddy`.
+
+{
+	# Email used for Let's Encrypt registration / expiry notices.
+	email admin@agnibits.com
+}
+
+agnihr.duckdns.org {
+	encode gzip zstd
+
+	# Max upload size (matches app limit for bulk import / documents).
+	request_body {
+		max_size 20MB
+	}
+
+	# Proxy everything (including Socket.io WebSocket upgrades) to the API.
+	reverse_proxy api:4000
+}

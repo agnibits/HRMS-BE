@@ -1,0 +1,952 @@
+// ─────────────────────────────────────────────────────────────────────────
+// HRMS — Prisma schema
+// Datasource: PostgreSQL   |   Client: JS (ESM)
+//
+// Conventions applied to every model:
+//   • id            String  @id @default(cuid())
+//   • Audit fields  createdAt / updatedAt / createdById / updatedById
+//   • Soft delete   deletedAt / deletedById  (BaseRepository excludes trashed rows)
+//   • Multi-tenant  companyId scoping where applicable
+// This file grows one module at a time; the core (auth, RBAC, org, audit) is here.
+// ─────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Enums ──────────────────────────────────────
+enum UserStatus {
+  PENDING // created, not yet activated / email unverified
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
+enum EmployeeType {
+  FULL_TIME
+  PART_TIME
+  CONTRACTOR
+  INTERN
+  CONSULTANT
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  UNDISCLOSED
+}
+
+enum TokenType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum OtpPurpose {
+  MFA_LOGIN
+  LOGIN
+  TRANSACTION
+}
+
+enum AuditStatus {
+  SUCCESS
+  FAILURE
+}
+
+// ─────────────────────────── Organization ───────────────────────────────
+model Company {
+  id           String  @id @default(cuid())
+  name         String
+  legalName    String?
+  code         String  @unique
+  email        String?
+  phone        String?
+  website      String?
+  logoUrl      String?
+  timezone     String  @default("UTC")
+  currency     String  @default("USD")
+  locale       String  @default("en")
+  weekStart    String  @default("MONDAY")
+  address      String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  country      String?
+  postalCode   String?
+  isActive     Boolean @default(true)
+
+  branches     Branch[]
+  departments  Department[]
+  designations Designation[]
+  users        User[]
+  employees    Employee[]
+  roles        Role[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@index([deletedAt])
+  @@map("companies")
+}
+
+model Branch {
+  id           String  @id @default(cuid())
+  companyId    String
+  company      Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  code         String
+  timezone     String?
+  city         String?
+  state        String?
+  country      String?
+  isHeadOffice Boolean @default(false)
+  isActive     Boolean @default(true)
+
+  employees   Employee[]
+  departments Department[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([deletedAt])
+  @@map("branches")
+}
+
+model Department {
+  id          String       @id @default(cuid())
+  companyId   String
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branchId    String?
+  branch      Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  name        String
+  code        String
+  parentId    String?
+  parent      Department?  @relation("DeptHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Department[] @relation("DeptHierarchy")
+  headId      String?
+  head        String?
+  description String?
+  status      EntityStatus @default(ACTIVE)
+  isActive    Boolean      @default(true)
+
+  designations Designation[]
+  employees    Employee[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([deletedAt])
+  @@map("departments")
+}
+
+model Designation {
+  id           String       @id @default(cuid())
+  companyId    String
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  departmentId String?
+  department   Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  title        String
+  code         String
+  level        Int?
+  description  String?
+  status       EntityStatus @default(ACTIVE)
+  isActive     Boolean      @default(true)
+
+  employees Employee[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@unique([companyId, code])
+  @@index([companyId])
+  @@index([deletedAt])
+  @@map("designations")
+}
+
+// ─────────────────────────── RBAC ───────────────────────────────────────
+model Role {
+  id          String   @id @default(cuid())
+  companyId   String?
+  company     Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  // Flattened permission strings (resource:action). "*" == all.
+  permissions String[]
+  isSystem    Boolean  @default(false)
+
+  users UserRole[]
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@unique([companyId, name])
+  @@index([companyId])
+  @@map("roles")
+}
+
+model UserRole {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId       String
+  role         Role     @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assignedAt   DateTime @default(now())
+  assignedById String?
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+// ─────────────────────────── Users & Auth ───────────────────────────────
+model User {
+  id           String     @id @default(cuid())
+  companyId    String?
+  company      Company?   @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  email        String     @unique
+  phone        String?
+  passwordHash String
+  firstName    String
+  lastName     String
+  avatarUrl    String?
+  status       UserStatus @default(PENDING)
+
+  emailVerifiedAt DateTime?
+  lastLoginAt     DateTime?
+  lastLoginIp     String?
+
+  // Extra per-user permission overrides (added on top of role permissions).
+  extraPermissions String[]
+
+  // MFA (TOTP)
+  mfaEnabled    Boolean   @default(false)
+  mfaSecret     String? // encrypted TOTP secret; null when disabled
+  mfaVerifiedAt DateTime?
+
+  // Password policy tracking
+  passwordChangedAt DateTime?
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
+
+  roles     UserRole[]
+  sessions  Session[]
+  devices   Device[]
+  tokens    VerificationToken[]
+  otpCodes  OtpCode[]
+  employee  Employee?
+  auditLogs AuditLog[]          @relation("AuditActor")
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model Device {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fingerprint String // hash of UA + platform, stable per device
+  name        String?
+  platform    String?
+  browser     String?
+  lastIp      String?
+  lastSeenAt  DateTime @default(now())
+  isTrusted   Boolean  @default(false)
+
+  sessions Session[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, fingerprint])
+  @@index([userId])
+  @@map("devices")
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId         String?
+  device           Device?   @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  // SHA-256 of the currently-valid refresh token (rotated on each refresh).
+  refreshTokenHash String
+  ipAddress        String?
+  userAgent        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  revokedReason    String?
+  lastUsedAt       DateTime  @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([refreshTokenHash])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      TokenType
+  tokenHash String // SHA-256 of the raw token sent to the user
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, type])
+  @@index([tokenHash])
+  @@map("verification_tokens")
+}
+
+model OtpCode {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose   OtpPurpose
+  codeHash  String
+  expiresAt DateTime
+  attempts  Int        @default(0)
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, purpose])
+  @@map("otp_codes")
+}
+
+// ─────────────────────────── Employee (core stub) ───────────────────────
+// Expanded fully in the Employee module phase; kept minimal here so User and
+// Organization relations resolve.
+model Employee {
+  id            String       @id @default(cuid())
+  companyId     String
+  company       Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId        String?      @unique
+  user          User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  employeeCode  String
+  branchId      String?
+  branch        Branch?      @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  departmentId  String?
+  department    Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  designationId String?
+  designation   Designation? @relation(fields: [designationId], references: [id], onDelete: SetNull)
+  managerId     String?
+  manager       Employee?    @relation("EmployeeManager", fields: [managerId], references: [id], onDelete: SetNull)
+  reports       Employee[]   @relation("EmployeeManager")
+
+  employeeType  EmployeeType @default(FULL_TIME)
+  gender        Gender?
+  dateOfBirth   DateTime?
+  dateOfJoining DateTime?
+  isActive      Boolean      @default(true)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@unique([companyId, employeeCode])
+  @@index([companyId])
+  @@index([managerId])
+  @@index([deletedAt])
+  @@map("employees")
+}
+
+// ─────────────────────────── Audit ──────────────────────────────────────
+model AuditLog {
+  id        String      @id @default(cuid())
+  action    String // CREATE | UPDATE | DELETE | RESTORE | LOGIN | ...
+  entity    String // logical entity/module name
+  entityId  String?
+  status    AuditStatus @default(SUCCESS)
+  before    Json?
+  after     Json?
+  metadata  Json?
+  actorId   String?
+  actor     User?       @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  companyId String?
+  ipAddress String?
+  userAgent String?
+  requestId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([actorId])
+  @@index([companyId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// HR MODULES (generated CRUD modules). companyId is a plain scalar (tenant
+// scope) kept relation-free to avoid coupling every model back to Company.
+// "employee/requester" references store a denormalized name snapshot for fast,
+// join-free reads. Shared trailer on each model: audit + soft-delete fields.
+// ═════════════════════════════════════════════════════════════════════════
+
+enum EntityStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  HALF_DAY
+  ON_LEAVE
+}
+
+enum LeaveType {
+  ANNUAL
+  SICK
+  CASUAL
+  MATERNITY
+  PATERNITY
+  UNPAID
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum HolidayType {
+  PUBLIC
+  COMPANY
+  OPTIONAL
+}
+
+enum PayrollStatus {
+  UNPAID
+  PROCESSING
+  PAID
+}
+
+enum JobType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+}
+
+enum JobStatus {
+  OPEN
+  ON_HOLD
+  CLOSED
+}
+
+enum CandidateStage {
+  APPLIED
+  SHORTLISTED
+  INTERVIEW
+  OFFERED
+  HIRED
+  REJECTED
+}
+
+enum InterviewMode {
+  ONSITE
+  REMOTE
+  PHONE
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  ON_HOLD
+}
+
+enum ReviewCycle {
+  Q1
+  Q2
+  Q3
+  Q4
+  ANNUAL
+}
+
+enum ReviewStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum GoalStatus {
+  ON_TRACK
+  AT_RISK
+  BEHIND
+  COMPLETED
+  CANCELLED
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AssetStatus {
+  AVAILABLE
+  ASSIGNED
+  IN_REPAIR
+  RETIRED
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REIMBURSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  ON_HOLD
+  CLOSED
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+}
+
+model Attendance {
+  id           String           @id @default(cuid())
+  companyId    String
+  employeeId   String?
+  employeeName String?
+  date         DateTime
+  checkIn      DateTime?
+  checkOut     DateTime?
+  status       AttendanceStatus @default(PRESENT)
+  notes        String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  deletedAt    DateTime?
+  createdById  String?
+  updatedById  String?
+  deletedById  String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("attendance")
+}
+
+model Leave {
+  id           String      @id @default(cuid())
+  companyId    String
+  employeeId   String?
+  employeeName String?
+  type         LeaveType   @default(ANNUAL)
+  startDate    DateTime
+  endDate      DateTime
+  reason       String
+  status       LeaveStatus @default(PENDING)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
+  createdById  String?
+  updatedById  String?
+  deletedById  String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([type])
+  @@index([deletedAt])
+  @@map("leaves")
+}
+
+model Holiday {
+  id          String      @id @default(cuid())
+  companyId   String
+  name        String
+  date        DateTime
+  type        HolidayType @default(PUBLIC)
+  description String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@index([companyId])
+  @@index([type])
+  @@index([deletedAt])
+  @@map("holidays")
+}
+
+model Payroll {
+  id           String        @id @default(cuid())
+  companyId    String
+  employeeId   String?
+  employeeName String?
+  period       String
+  gross        Float
+  deductions   Float         @default(0)
+  bonus        Float         @default(0)
+  status       PayrollStatus @default(UNPAID)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+  createdById  String?
+  updatedById  String?
+  deletedById  String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("payrolls")
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  companyId   String
+  title       String
+  department  String?
+  location    String?
+  type        JobType   @default(FULL_TIME)
+  openings    Int       @default(1)
+  status      JobStatus @default(OPEN)
+  description String?
+  applicants  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([type])
+  @@index([deletedAt])
+  @@map("jobs")
+}
+
+model Candidate {
+  id          String         @id @default(cuid())
+  companyId   String
+  firstName   String
+  lastName    String
+  email       String
+  phone       String?
+  jobTitle    String
+  stage       CandidateStage @default(APPLIED)
+  source      String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@index([companyId])
+  @@index([stage])
+  @@index([deletedAt])
+  @@map("candidates")
+}
+
+model Interview {
+  id            String          @id @default(cuid())
+  companyId     String
+  candidateId   String?
+  candidateName String?
+  jobTitle      String?
+  round         String?
+  interviewer   String
+  scheduledAt   DateTime
+  mode          InterviewMode   @default(ONSITE)
+  status        InterviewStatus @default(SCHEDULED)
+  notes         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  deletedAt     DateTime?
+  createdById   String?
+  updatedById   String?
+  deletedById   String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([mode])
+  @@index([candidateId])
+  @@index([deletedAt])
+  @@map("interviews")
+}
+
+model Onboarding {
+  id           String           @id @default(cuid())
+  companyId    String
+  employeeId   String?
+  employeeName String?
+  startDate    DateTime
+  buddy        String?
+  manager      String?
+  status       OnboardingStatus @default(NOT_STARTED)
+  progress     Int              @default(0)
+  notes        String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  deletedAt    DateTime?
+  createdById  String?
+  updatedById  String?
+  deletedById  String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("onboardings")
+}
+
+model PerformanceReview {
+  id           String       @id @default(cuid())
+  companyId    String
+  employeeId   String?
+  employeeName String?
+  reviewer     String
+  cycle        ReviewCycle  @default(ANNUAL)
+  score        Float        @default(0)
+  status       ReviewStatus @default(DRAFT)
+  summary      String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+  createdById  String?
+  updatedById  String?
+  deletedById  String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([cycle])
+  @@index([deletedAt])
+  @@map("performance_reviews")
+}
+
+model Goal {
+  id          String     @id @default(cuid())
+  companyId   String
+  title       String
+  owner       String
+  dueDate     DateTime
+  progress    Int        @default(0)
+  status      GoalStatus @default(ON_TRACK)
+  keyResults  Json?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("goals")
+}
+
+model Course {
+  id            String       @id @default(cuid())
+  companyId     String
+  title         String
+  category      String?
+  instructor    String?
+  durationHours Float        @default(0)
+  status        CourseStatus @default(DRAFT)
+  description   String?
+  enrolled      Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+  createdById   String?
+  updatedById   String?
+  deletedById   String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([category])
+  @@index([deletedAt])
+  @@map("courses")
+}
+
+model Asset {
+  id           String      @id @default(cuid())
+  companyId    String
+  name         String
+  tag          String
+  category     String?
+  assignedTo   String?
+  purchaseDate DateTime?
+  cost         Float?
+  status       AssetStatus @default(AVAILABLE)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  deletedAt    DateTime?
+  createdById  String?
+  updatedById  String?
+  deletedById  String?
+
+  @@unique([companyId, tag])
+  @@index([companyId])
+  @@index([status])
+  @@index([category])
+  @@index([deletedAt])
+  @@map("assets")
+}
+
+model Expense {
+  id           String        @id @default(cuid())
+  companyId    String
+  title        String
+  employeeId   String?
+  employeeName String?
+  category     String?
+  amount       Float
+  date         DateTime
+  status       ExpenseStatus @default(PENDING)
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+  createdById  String?
+  updatedById  String?
+  deletedById  String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([category])
+  @@index([deletedAt])
+  @@map("expenses")
+}
+
+model Ticket {
+  id            String         @id @default(cuid())
+  companyId     String
+  subject       String
+  requesterId   String?
+  requesterName String?
+  category      String?
+  priority      TicketPriority @default(MEDIUM)
+  assignee      String?
+  status        TicketStatus   @default(OPEN)
+  description   String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deletedAt     DateTime?
+  createdById   String?
+  updatedById   String?
+  deletedById   String?
+
+  @@index([companyId])
+  @@index([status])
+  @@index([priority])
+  @@index([deletedAt])
+  @@map("tickets")
+}
+
+model Document {
+  id          String    @id @default(cuid())
+  companyId   String
+  name        String
+  category    String?
+  owner       String?
+  notes       String?
+  fileName    String?
+  fileUrl     String?
+  fileSize    Int?
+  mimeType    String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  createdById String?
+  updatedById String?
+  deletedById String?
+
+  @@index([companyId])
+  @@index([category])
+  @@index([deletedAt])
+  @@map("documents")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  companyId String
+  userId    String?
+  title     String
+  message   String?
+  type      NotificationType @default(INFO)
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([read])
+  @@map("notifications")
+}

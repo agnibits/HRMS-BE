@@ -1,0 +1,105 @@
+# ─────────────────────────────────────────────────────────────────────────
+# Production stack for a single Lightsail instance.
+# Only Nginx is exposed to the internet (port 80). Postgres & Redis stay on the
+# internal Docker network. API runs migrations on deploy (see deploy/deploy.sh).
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+# ─────────────────────────────────────────────────────────────────────────
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hrms_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hrms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-hrms}
+    volumes:
+      - hrms_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-hrms} -d ${POSTGRES_DB:-hrms}']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [hrms]
+
+  redis:
+    image: redis:7-alpine
+    container_name: hrms_redis
+    restart: always
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - hrms_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [hrms]
+
+  api:
+    build: .
+    image: hrms-api:latest
+    container_name: hrms_api
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hrms}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hrms}?schema=public
+      REDIS_URL: redis://redis:6379
+      REDIS_DRIVER: redis
+      TRUST_PROXY: 'true'
+    expose:
+      - '4000'
+    networks: [hrms]
+
+  worker:
+    build: .
+    image: hrms-api:latest
+    container_name: hrms_worker
+    restart: always
+    command: ['node', 'src/worker.js']
+    healthcheck:
+      disable: true # worker runs no HTTP server; the image's HTTP healthcheck N/A
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hrms}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-hrms}?schema=public
+      REDIS_URL: redis://redis:6379
+      REDIS_DRIVER: redis
+    networks: [hrms]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: hrms_caddy
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [hrms]
+
+volumes:
+  hrms_pg_data:
+  hrms_redis_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  hrms:
+    driver: bridge

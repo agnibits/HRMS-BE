@@ -1,0 +1,22 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+storage/uploads/
+dist/
+build/
+coverage/
+*.log
+logs/
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+prisma/*.db
+tmp/
+.dev/
+
+# Never commit private keys / secrets
+*.pem
+*.key
+*.ppk
