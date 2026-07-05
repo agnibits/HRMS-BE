@@ -59,6 +59,10 @@ const schema = z.object({
   ENABLE_SWAGGER: boolean(true),
   ENABLE_MFA: boolean(true),
   TRUST_PROXY: boolean(false),
+
+  // AI (Groq — free, OpenAI-compatible). Optional: AI routes return 503 if unset.
+  GROQ_API_KEY: z.string().optional().default(''),
+  GROQ_MODEL: z.string().default('llama-3.3-70b-versatile'),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -134,6 +138,11 @@ export const config = {
     maxUploadBytes: env.MAX_UPLOAD_SIZE_MB * 1024 * 1024,
   },
   swagger: { enabled: env.ENABLE_SWAGGER },
+  ai: {
+    groqApiKey: env.GROQ_API_KEY,
+    model: env.GROQ_MODEL,
+    enabled: !!env.GROQ_API_KEY,
+  },
 };
 
 export default config;

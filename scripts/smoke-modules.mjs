@@ -131,6 +131,14 @@ async function main() {
   const compUpd = await put(`/companies/${comp.j.data[0].id}`, { weekStart: 'SUNDAY', currency: 'INR' });
   rec('PUT /companies/:id', compUpd.status === 200 && compUpd.j.data.currency === 'INR');
 
+  // AI (no GROQ key in test → graceful degrade)
+  const aiStatus = await get('/ai/status');
+  rec('GET /ai/status (configured:false w/o key)', aiStatus.j.data?.configured === false);
+  const aiChat = await post('/ai/chat', { messages: [{ role: 'user', content: 'hi' }] });
+  rec('POST /ai/chat (no key → 503 AI_NOT_CONFIGURED)', aiChat.status === 503 && aiChat.j.error?.code === 'AI_NOT_CONFIGURED');
+  const aiVal = await post('/ai/chat', { messages: [] });
+  rec('POST /ai/chat (empty messages → 422)', aiVal.status === 422);
+
   // Validation + RBAC
   const bad = await post('/departments', { code: 'X' }); // missing name
   rec('POST /departments (missing name → 422)', bad.status === 422);

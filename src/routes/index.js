@@ -7,6 +7,7 @@ import { hrModules } from '../modules/hr/index.js';
 import documentRoutes from '../modules/documents/document.routes.js';
 import notificationRoutes from '../modules/notifications/notification.routes.js';
 import companyRoutes from '../modules/companies/company.routes.js';
+import aiRoutes from '../modules/ai/ai.routes.js';
 
 /**
  * Root API router. Core modules are mounted explicitly; the generated HR CRUD
@@ -31,5 +32,6 @@ for (const module of hrModules) {
 router.use('/documents', documentRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/companies', companyRoutes);
+router.use('/ai', aiRoutes);
 
 export default router;
