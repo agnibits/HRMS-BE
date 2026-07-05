@@ -63,6 +63,10 @@ const schema = z.object({
   // AI (Groq — free, OpenAI-compatible). Optional: AI routes return 503 if unset.
   GROQ_API_KEY: z.string().optional().default(''),
   GROQ_MODEL: z.string().default('llama-3.3-70b-versatile'),
+
+  // Block leave requests that exceed the employee's remaining balance (only when
+  // a matching paid leave policy exists; unpaid/undefined types are never blocked).
+  LEAVE_BALANCE_ENFORCE: boolean(true),
 });
 
 const parsed = schema.safeParse(process.env);
@@ -142,6 +146,9 @@ export const config = {
     groqApiKey: env.GROQ_API_KEY,
     model: env.GROQ_MODEL,
     enabled: !!env.GROQ_API_KEY,
+  },
+  leave: {
+    enforceBalance: env.LEAVE_BALANCE_ENFORCE,
   },
 };
 

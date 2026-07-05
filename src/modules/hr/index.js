@@ -14,6 +14,7 @@ import {
   workHoursBetween,
   dayCount,
 } from './helpers.js';
+import { computeBalances, assertBalance } from './leaveBalance.js';
 
 /**
  * All standard HR CRUD modules, defined declaratively via the CRUD factory.
@@ -173,6 +174,24 @@ export const hrModules = [
       reason: body.reason,
       status: body.status,
     }),
+    // Block over-requests against the employee's remaining balance.
+    beforeCreate: async (data, ctx) => {
+      await assertBalance(ctx.companyId, data);
+      return data;
+    },
+    // GET /leaves/balance?employee=<id|email> → per-policy allocated/used/remaining
+    extendRouter: (router, { ok, asyncHandler, authorize }) => {
+      router.get(
+        '/balance',
+        authorize('leave:read'),
+        asyncHandler(async (req, res) => {
+          const ref = req.query.employee || req.user.id;
+          const u = await resolveUser(ref);
+          const balances = await computeBalances(req.user.companyId, u.id ?? ref);
+          return ok(res, balances, 'Leave balance');
+        })
+      );
+    },
     exportable: true,
     schemas: {
       list: listQuery({ status: z.enum(E.leaveStatus).optional(), type: z.enum(E.leaveType).optional() }),

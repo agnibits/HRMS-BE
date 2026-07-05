@@ -95,6 +95,15 @@ async function main() {
   const ltDup = await post('/leave-types', { name: 'Annual', code: 'ANNUAL', daysPerYear: 10 });
   rec('POST /leave-types (duplicate code → 409)', ltDup.status === 409);
 
+  // Leave balance (ANNUAL policy=20 exists; one 3-day PENDING ANNUAL leave from above)
+  const bal = await get(`/leaves/balance?employee=${userId}`);
+  const annual = (bal.j.data || []).find((b) => b.code === 'ANNUAL');
+  rec('GET /leaves/balance', !!annual && annual.allocated === 20 && annual.pending === 3, `alloc=${annual?.allocated} pending=${annual?.pending} avail=${annual?.available}`);
+  const over = await post('/leaves', { employee: userId, type: 'ANNUAL', startDate: '2026-08-01', endDate: '2026-08-25', reason: 'long' }); // 25d > 17 avail
+  rec('POST /leaves (over balance → 422)', over.status === 422 && over.j.error?.code === 'INSUFFICIENT_LEAVE_BALANCE');
+  const within = await post('/leaves', { employee: userId, type: 'ANNUAL', startDate: '2026-08-01', endDate: '2026-08-05', reason: 'ok' }); // 5d <= 17
+  rec('POST /leaves (within balance → 201)', within.status === 201);
+
   // Payroll → net
   const pay = await post('/payroll', { employee: userId, period: '2026-07', gross: 5000, deductions: 500, bonus: 200 });
   rec('POST /payroll (net = gross-ded+bonus)', pay.status === 201 && pay.j.data.net === 4700, `net=${pay.j.data?.net}`);
