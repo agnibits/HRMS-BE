@@ -33,6 +33,21 @@ export function authenticate(req, _res, next) {
         if (revoked) throw ApiError.unauthorized('Token has been revoked', { code: 'TOKEN_REVOKED' });
       }
 
+      // Instant tenant-suspension enforcement for still-valid access tokens.
+      // SUPER_ADMIN bypasses so the platform owner can never self-lock.
+      const roles = payload.roles ?? [];
+      if (payload.companyId && !roles.includes('SUPER_ADMIN')) {
+        let suspended = null;
+        try {
+          suspended = await redis.get(`company:suspended:${payload.companyId}`);
+        } catch {
+          /* redis down — login/refresh still enforce via DB */
+        }
+        if (suspended) {
+          throw ApiError.forbidden('Your workspace is suspended. Contact Agnibits.', { code: 'COMPANY_SUSPENDED' });
+        }
+      }
+
       const user = {
         id: payload.sub,
         email: payload.email,

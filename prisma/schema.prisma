@@ -58,12 +58,27 @@ enum AuditStatus {
   FAILURE
 }
 
+enum CompanyPlan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum CompanyStatus {
+  ACTIVE
+  SUSPENDED
+}
+
 // ─────────────────────────── Organization ───────────────────────────────
 model Company {
-  id           String  @id @default(cuid())
-  name         String
+  id           String        @id @default(cuid())
+  name         String        @unique
+  plan         CompanyPlan   @default(FREE)
+  status       CompanyStatus @default(ACTIVE)
+  adminEmail   String?
   legalName    String?
-  code         String  @unique
+  code         String        @unique
   email        String?
   phone        String?
   website      String?

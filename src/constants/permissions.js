@@ -61,10 +61,18 @@ export const PERMISSIONS = buildPermissions();
 
 export const ALL_PERMISSIONS = [...new Set(Object.values(PERMISSIONS))];
 
-/** Expand a permission set: if it contains the wildcard, return every permission. */
+/**
+ * Platform-level permissions belong ONLY to the Agnibits platform SUPER_ADMIN
+ * (tenant provisioning across all companies). Deliberately excluded from
+ * ALL_PERMISSIONS so company ADMINs never receive them.
+ */
+export const PLATFORM_PERMISSIONS = ['platform:manage'];
+PERMISSIONS.PLATFORM_MANAGE = 'platform:manage';
+
+/** Expand a permission set: the wildcard grants every permission incl. platform. */
 export function expandPermissions(permissionSet) {
   const set = new Set(permissionSet);
-  if (set.has(WILDCARD)) return [WILDCARD, ...ALL_PERMISSIONS];
+  if (set.has(WILDCARD)) return [WILDCARD, ...ALL_PERMISSIONS, ...PLATFORM_PERMISSIONS];
   return [...set];
 }
 

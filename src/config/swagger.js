@@ -29,6 +29,12 @@ export const swaggerSpec = swaggerJSDoc({
       { name: 'Users', description: 'User management (admin) & self-service profile' },
       { name: 'Roles', description: 'Role-based access control — roles & permission catalog' },
       { name: 'Audit', description: 'Immutable audit trail (read-only)' },
+      {
+        name: 'Agnibits superAdmin',
+        description:
+          'Platform tenant provisioning & lifecycle — for the Agnibits master control site. ' +
+          'Requires the platform SUPER_ADMIN (permission platform:manage). Not for tenant HRMS users.',
+      },
     ],
     components: {
       securitySchemes: {

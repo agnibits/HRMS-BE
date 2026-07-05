@@ -41,6 +41,10 @@ class AuthService {
     if (user.status === 'DISABLED' || user.status === 'SUSPENDED') {
       throw ApiError.forbidden('Account is not active', { code: 'ACCOUNT_INACTIVE' });
     }
+    // Tenant-level suspension (platform SUPER_ADMIN bypasses so it can't self-lock).
+    if (user.company?.status === 'SUSPENDED' && !user.roleNames.includes('SUPER_ADMIN')) {
+      throw ApiError.forbidden('Your workspace is suspended. Contact Agnibits.', { code: 'COMPANY_SUSPENDED' });
+    }
 
     const valid = await verifyPassword(user.passwordHash, password);
     if (!valid) {
@@ -108,6 +112,9 @@ class AuthService {
 
     const user = await userRepository.findByIdWithPermissions(session.userId);
     if (!user) throw ApiError.unauthorized('User no longer exists', { code: 'USER_NOT_FOUND' });
+    if (user.company?.status === 'SUSPENDED' && !user.roleNames.includes('SUPER_ADMIN')) {
+      throw ApiError.forbidden('Your workspace is suspended. Contact Agnibits.', { code: 'COMPANY_SUSPENDED' });
+    }
 
     const tokens = await rotateSession(session, user, {
       permissions: user.permissionList,

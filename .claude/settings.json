@@ -21,7 +21,9 @@
       "Bash(echo \"pid $!\")",
       "Bash(curl -s --retry 40 --retry-delay 1 --retry-connrefused http://localhost:4000/health)",
       "Bash(curl -s -X POST http://localhost:4000/api/v1/auth/login -H \"content-type: application/json\" -d '{\"email\":\"admin@hrms.local\",\"password\":\"Admin@12345\"}')",
-      "Bash(cd /d/Agnibits-HR/HR-BE *)"
+      "Bash(cd /d/Agnibits-HR/HR-BE *)",
+      "Bash(node --check scripts/smoke-modules.mjs)",
+      "Bash(powershell -Command \"Get-Process postgres -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue\")"
     ],
     "additionalDirectories": [
       "\\tmp"

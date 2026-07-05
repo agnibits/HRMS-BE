@@ -142,11 +142,47 @@ async function main() {
   const notifList = await get('/notifications');
   rec('GET /notifications (unread meta)', notifList.j.meta.pagination.unread === 0);
 
-  // Company settings
+  // Company settings (tenant self-service — super admin also sees own via ?limit=1... but super lists all)
   const comp = await get('/companies?limit=1');
-  rec('GET /companies?limit=1', comp.j.data?.length === 1, comp.j.data?.[0]?.name);
-  const compUpd = await put(`/companies/${comp.j.data[0].id}`, { weekStart: 'SUNDAY', currency: 'INR' });
-  rec('PUT /companies/:id', compUpd.status === 200 && compUpd.j.data.currency === 'INR');
+  rec('GET /companies (super admin lists all)', Array.isArray(comp.j.data) && comp.j.data.length >= 1);
+  const ownId = login.data.user.companyId;
+  const compUpd = await put(`/companies/${ownId}`, { plan: 'PRO' });
+  rec('PUT /companies/:id (platform: plan)', compUpd.status === 200 && compUpd.j.data.plan === 'PRO');
+
+  // ── Agnibits superAdmin: provisioning + suspend flow ──
+  const prov = await post('/companies', { name: 'Acme Inc', plan: 'PRO', admin: { firstName: 'Jane', lastName: 'Doe', email: 'jane@acme.test', password: 'Temp@1234' } });
+  rec('POST /companies (provision company+admin)', prov.status === 201 && prov.j.data.company.name === 'Acme Inc' && prov.j.data.admin.role === 'ADMIN', `co=${prov.j.data?.company?.id}`);
+  const newCoId = prov.j.data?.company?.id;
+  const provDup = await post('/companies', { name: 'Acme Inc', admin: { firstName: 'X', lastName: 'Y', email: 'x@acme.test', password: 'Temp@1234' } });
+  rec('POST /companies (duplicate name → 409)', provDup.status === 409);
+  const listAll = await get('/companies?plan=PRO&search=acme');
+  rec('GET /companies (filter plan+search)', listAll.j.data?.some((c) => c.name === 'Acme Inc' && typeof c.employeeCount === 'number'));
+
+  // new tenant admin can log in immediately (email pre-verified)
+  const acmeLogin = await post('/auth/login', { email: 'jane@acme.test', password: 'Temp@1234' });
+  rec('Acme admin can log in (verified)', acmeLogin.status === 200 && !!acmeLogin.j.data?.accessToken);
+  const acmeH = { authorization: `Bearer ${acmeLogin.j.data.accessToken}`, 'content-type': 'application/json' };
+  // tenant admin sees ONLY own company, cannot provision
+  const acmeList = await fetch(`${api}/companies`, { headers: acmeH }).then((r) => r.json());
+  rec('Tenant admin GET /companies → only own', acmeList.data?.length === 1 && acmeList.data[0].id === newCoId);
+  const acmeProvTry = await fetch(`${api}/companies`, { method: 'POST', headers: acmeH, body: JSON.stringify({ name: 'Hack Co', admin: { firstName: 'a', lastName: 'b', email: 'z@z.test', password: 'Temp@1234' } }) });
+  rec('Tenant admin POST /companies → 403', acmeProvTry.status === 403);
+
+  // suspend Acme → its admin login blocked
+  const susp = await put(`/companies/${newCoId}`, { status: 'SUSPENDED' });
+  rec('PUT /companies/:id (suspend)', susp.status === 200 && susp.j.data.status === 'SUSPENDED');
+  const blockedLogin = await post('/auth/login', { email: 'jane@acme.test', password: 'Temp@1234' });
+  rec('Suspended company → login 403 COMPANY_SUSPENDED', blockedLogin.status === 403 && blockedLogin.j.error?.code === 'COMPANY_SUSPENDED');
+  // existing token also blocked (redis flag)
+  const blockedReq = await fetch(`${api}/departments`, { headers: acmeH });
+  rec('Suspended company → existing token 403', blockedReq.status === 403);
+  // reactivate → login works again
+  await put(`/companies/${newCoId}`, { status: 'ACTIVE' });
+  const reLogin = await post('/auth/login', { email: 'jane@acme.test', password: 'Temp@1234' });
+  rec('Reactivated → login works', reLogin.status === 200);
+  // reset-admin
+  const reset = await post(`/companies/${newCoId}/reset-admin`, {});
+  rec('POST /companies/:id/reset-admin', reset.status === 200 && !!reset.j.data?.tempPassword && reset.j.data.email === 'jane@acme.test');
 
   // AI (no GROQ key in test → graceful degrade)
   const aiStatus = await get('/ai/status');

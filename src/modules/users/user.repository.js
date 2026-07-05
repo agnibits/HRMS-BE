@@ -26,7 +26,10 @@ class UserRepository extends BaseRepository {
   async findWithPermissions(where) {
     const user = await this.delegate.findFirst({
       where: { ...where, deletedAt: null },
-      include: { roles: { include: { role: true } } },
+      include: {
+        roles: { include: { role: true } },
+        company: { select: { id: true, status: true } },
+      },
     });
     if (!user) return null;
 
