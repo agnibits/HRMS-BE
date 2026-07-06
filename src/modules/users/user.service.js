@@ -8,6 +8,7 @@ import { recordChange, record, AuditAction } from '../audit/audit.service.js';
 import { buildWorkbookBuffer, parseSheet } from '../../utils/excel.js';
 import { createUserSchema } from './user.validators.js';
 import { tenantWhere } from '../../utils/tenant.js';
+import { roleService } from '../roles/role.service.js';
 
 const PUBLIC_SELECT = {
   id: true,
@@ -72,7 +73,10 @@ class UserService {
     if (existing) throw ApiError.conflict('A user with this email already exists', { code: 'EMAIL_TAKEN' });
 
     const companyId = this.#targetCompany(ctx, data.companyId);
-    if (data.roleIds?.length) await this.#assertRolesExist(data.roleIds, companyId);
+    if (data.roleIds?.length) {
+      await this.#assertRolesExist(data.roleIds, companyId);
+      await roleService.assertAssignable(data.roleIds, ctx); // block SUPER_ADMIN/platform roles for tenants
+    }
 
     const tempPassword = data.password ?? this.#generateTempPassword();
     const passwordHash = await hashPassword(tempPassword);
@@ -152,6 +156,7 @@ class UserService {
     const user = await prisma.user.findFirst({ where: tenantWhere(ctx, { id, deletedAt: null }) });
     if (!user) throw ApiError.notFound('User not found', { code: 'USER_NOT_FOUND' });
     await this.#assertRolesExist(roleIds, user.companyId);
+    await roleService.assertAssignable(roleIds, ctx); // block SUPER_ADMIN/platform roles for tenants
     await userRepository.setRoles(id, roleIds, ctx.actorId);
     await record({ action: AuditAction.UPDATE, entity: 'user', entityId: id, metadata: { roleIds }, actorId: ctx.actorId });
     return this.getById(id, ctx);

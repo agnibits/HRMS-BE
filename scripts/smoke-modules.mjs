@@ -207,6 +207,26 @@ async function main() {
   // Super admin still sees across tenants
   const superUsers = await get('/users?limit=100');
   rec('Super admin sees all tenants', superUsers.j.data.some((u) => u.id === demoUserId) && superUsers.j.data.some((u) => u.companyId === newCoId));
+
+  // ── PRIVILEGE-ESCALATION PROTECTION (tenant can never become SUPER_ADMIN) ──
+  const superRoles = await get('/roles?limit=100');
+  const superRoleId = superRoles.j.data.find((r) => r.name === 'SUPER_ADMIN')?.id;
+  // tenant tries to create a wildcard role
+  const makeSuper = await jpost('/roles', { name: 'Hacker', permissions: ['*'] });
+  rec('ESCALATION: tenant create *-role → 403', makeSuper.status === 403 && makeSuper.j.error?.code === 'FORBIDDEN_PERMISSION');
+  const makePlatform = await jpost('/roles', { name: 'Hacker2', permissions: ['platform:manage'] });
+  rec('ESCALATION: tenant create platform-role → blocked (403/422)', [403, 422].includes(makePlatform.status));
+  // SUPER_ADMIN hidden from tenant /roles
+  const acmeRoleList = await jget('/roles?limit=100');
+  rec('ESCALATION: SUPER_ADMIN hidden from tenant /roles', !acmeRoleList.j.data.some((r) => r.name === 'SUPER_ADMIN'));
+  // tenant GET SUPER_ADMIN by id → 404
+  const acmeGetSuper = await jget(`/roles/${superRoleId}`);
+  rec('ESCALATION: tenant GET SUPER_ADMIN role → 404', acmeGetSuper.status === 404);
+  // tenant tries to assign SUPER_ADMIN to a user → 403
+  const janeId = reLogin.j.data.user.id;
+  const assignSuper = await fetch(`${api}/users/${janeId}/roles`, { method: 'PUT', headers: acme2H, body: JSON.stringify({ roleIds: [superRoleId] }) });
+  const assignSuperJson = await assignSuper.json();
+  rec('ESCALATION: tenant assign SUPER_ADMIN → 403', assignSuper.status === 403 && assignSuperJson.error?.code === 'FORBIDDEN_ROLE_ASSIGNMENT');
   // reset-admin
   const reset = await post(`/companies/${newCoId}/reset-admin`, {});
   rec('POST /companies/:id/reset-admin', reset.status === 200 && !!reset.j.data?.tempPassword && reset.j.data.email === 'jane@acme.test');
