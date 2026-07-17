@@ -17,6 +17,10 @@ export const AuditAction = {
   LOGIN_FAILED: 'LOGIN_FAILED',
   PASSWORD_CHANGE: 'PASSWORD_CHANGE',
   ACCESS: 'ACCESS',
+  // User lifecycle events surfaced in the app's Activity tab
+  ROLE_CHANGED: 'ROLE_CHANGED',
+  PROFILE_UPDATED: 'PROFILE_UPDATED',
+  INVITE_RESENT: 'INVITE_RESENT',
 };
 
 export async function record({

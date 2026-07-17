@@ -9,6 +9,7 @@ import { buildWorkbookBuffer, parseSheet } from '../../utils/excel.js';
 import { createUserSchema } from './user.validators.js';
 import { tenantWhere } from '../../utils/tenant.js';
 import { roleService } from '../roles/role.service.js';
+import { resolveUser } from '../hr/helpers.js';
 
 const PUBLIC_SELECT = {
   id: true,
@@ -19,6 +20,14 @@ const PUBLIC_SELECT = {
   avatarUrl: true,
   status: true,
   companyId: true,
+  // HR profile
+  employeeId: true,
+  department: true,
+  designation: true,
+  managerId: true,
+  managerName: true,
+  joiningDate: true,
+  employmentType: true,
   emailVerifiedAt: true,
   mfaEnabled: true,
   lastLoginAt: true,
@@ -43,6 +52,46 @@ class UserService {
   /** Resolve the company a write should target (tenant users are forced to own). */
   #targetCompany(ctx, requested) {
     return ctx.isSuperAdmin ? (requested ?? ctx.companyId ?? null) : ctx.companyId;
+  }
+
+  /**
+   * Translate the HR profile fields from a request body into DB columns.
+   * `manager` (id or email) is denormalized into managerId + managerName; only
+   * keys present in the body are touched, so PATCH-style updates stay partial.
+   */
+  async #hrPatch(data, companyId, { generateEmployeeId = false } = {}) {
+    const patch = {};
+    for (const key of ['department', 'designation', 'joiningDate', 'employmentType']) {
+      if (data[key] !== undefined) patch[key] = data[key];
+    }
+    if (data.manager !== undefined) {
+      if (!data.manager) {
+        patch.managerId = null;
+        patch.managerName = null;
+      } else {
+        const m = await resolveUser(data.manager);
+        patch.managerId = m.id;
+        patch.managerName = m.name;
+      }
+    }
+    if (data.employeeId) patch.employeeId = data.employeeId;
+    else if (generateEmployeeId) patch.employeeId = await this.#nextEmployeeId(companyId);
+    else if (data.employeeId === null) patch.employeeId = null;
+    return patch;
+  }
+
+  /** Next human-readable employee code for a company, e.g. EMP-001. */
+  async #nextEmployeeId(companyId) {
+    if (!companyId) return null;
+    const rows = await prisma.user.findMany({
+      where: { companyId, employeeId: { not: null } },
+      select: { employeeId: true },
+    });
+    const max = rows.reduce((acc, r) => {
+      const n = parseInt(String(r.employeeId).replace(/\D/g, ''), 10);
+      return Number.isFinite(n) && n > acc ? n : acc;
+    }, 0);
+    return `EMP-${String(max + 1).padStart(3, '0')}`;
   }
 
   async list(query, ctx) {
@@ -80,6 +129,7 @@ class UserService {
 
     const tempPassword = data.password ?? this.#generateTempPassword();
     const passwordHash = await hashPassword(tempPassword);
+    const hr = await this.#hrPatch(data, companyId, { generateEmployeeId: true });
 
     const user = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
@@ -93,6 +143,7 @@ class UserService {
           passwordHash,
           extraPermissions: [],
           createdById: ctx.actorId,
+          ...hr,
         },
       });
       if (data.roleIds?.length) {
@@ -117,8 +168,14 @@ class UserService {
     const before = await prisma.user.findFirst({ where: tenantWhere(ctx, { id, deletedAt: null }) });
     if (!before) throw ApiError.notFound('User not found', { code: 'USER_NOT_FOUND' });
 
+    // Strip the request-only HR aliases; #hrPatch maps them to real columns.
+    const { manager, employeeId, department, designation, joiningDate, employmentType, ...rest } = data;
+    const patch = {
+      ...rest,
+      ...(await this.#hrPatch(data, before.companyId)),
+      updatedById: ctx.actorId,
+    };
     // Tenant admins can never move a user to another company.
-    const patch = { ...data, updatedById: ctx.actorId };
     if (!ctx.isSuperAdmin) delete patch.companyId;
 
     const after = await prisma.user.update({ where: { id }, data: patch });
@@ -126,8 +183,19 @@ class UserService {
     return this.getById(id, ctx);
   }
 
+  /** Self-service profile update (audited so it shows in the Activity tab). */
   async updateProfile(id, data) {
-    await prisma.user.update({ where: { id }, data });
+    const before = await prisma.user.findFirst({ where: { id, deletedAt: null } });
+    if (!before) throw ApiError.notFound('User not found', { code: 'USER_NOT_FOUND' });
+    const after = await prisma.user.update({ where: { id }, data });
+    await recordChange({
+      action: AuditAction.PROFILE_UPDATED,
+      entity: 'user',
+      entityId: id,
+      before,
+      after,
+      actorId: id,
+    });
     return prisma.user.findFirst({ where: { id }, select: PUBLIC_SELECT }).then((u) => this.#shape(u));
   }
 
@@ -157,9 +225,51 @@ class UserService {
     if (!user) throw ApiError.notFound('User not found', { code: 'USER_NOT_FOUND' });
     await this.#assertRolesExist(roleIds, user.companyId);
     await roleService.assertAssignable(roleIds, ctx); // block SUPER_ADMIN/platform roles for tenants
+
+    const [prevRoles, nextRoles] = await Promise.all([
+      prisma.userRole.findMany({ where: { userId: id }, select: { role: { select: { name: true } } } }),
+      prisma.role.findMany({ where: { id: { in: roleIds } }, select: { name: true } }),
+    ]);
     await userRepository.setRoles(id, roleIds, ctx.actorId);
-    await record({ action: AuditAction.UPDATE, entity: 'user', entityId: id, metadata: { roleIds }, actorId: ctx.actorId });
+    await record({
+      action: AuditAction.ROLE_CHANGED,
+      entity: 'user',
+      entityId: id,
+      metadata: {
+        roleIds,
+        from: prevRoles.map((r) => r.role.name),
+        to: nextRoles.map((r) => r.name),
+      },
+      actorId: ctx.actorId,
+    });
     return this.getById(id, ctx);
+  }
+
+  /**
+   * Re-invite a user: issues a fresh temporary password, revokes existing
+   * sessions and re-sends the welcome email. Returns the password so an admin
+   * can relay it directly (useful when SMTP delivery is unavailable).
+   */
+  async resendInvite(id, ctx) {
+    const user = await prisma.user.findFirst({ where: tenantWhere(ctx, { id, deletedAt: null }) });
+    if (!user) throw ApiError.notFound('User not found', { code: 'USER_NOT_FOUND' });
+
+    const tempPassword = this.#generateTempPassword();
+    await prisma.user.update({
+      where: { id },
+      data: { passwordHash: await hashPassword(tempPassword), passwordChangedAt: new Date() },
+    });
+    // Old credentials must stop working immediately.
+    await prisma.session.updateMany({
+      where: { userId: id, revokedAt: null },
+      data: { revokedAt: new Date(), revokedReason: 'invite_resent' },
+    });
+
+    const tpl = templates.welcome({ name: user.firstName, email: user.email, tempPassword });
+    await enqueueEmail({ to: user.email, ...tpl });
+
+    await record({ action: AuditAction.INVITE_RESENT, entity: 'user', entityId: id, actorId: ctx.actorId });
+    return { email: user.email, tempPassword, emailQueued: true };
   }
 
   // ── Bulk export ────────────────────────────────────────────────────
@@ -180,19 +290,31 @@ class UserService {
     });
 
     const columns = [
+      { header: 'Employee ID', key: 'employeeId', width: 14 },
       { header: 'Email', key: 'email', width: 30 },
       { header: 'First Name', key: 'firstName', width: 18 },
       { header: 'Last Name', key: 'lastName', width: 18 },
       { header: 'Phone', key: 'phone', width: 18 },
+      { header: 'Department', key: 'department', width: 20 },
+      { header: 'Designation', key: 'designation', width: 20 },
+      { header: 'Manager', key: 'managerName', width: 20 },
+      { header: 'Employment Type', key: 'employmentType', width: 16 },
+      { header: 'Joining Date', key: 'joiningDate', width: 14 },
       { header: 'Status', key: 'status', width: 12 },
       { header: 'Roles', key: 'roles', width: 30 },
       { header: 'Created At', key: 'createdAt', width: 22 },
     ];
     const rows = users.map((u) => ({
+      employeeId: u.employeeId ?? '',
       email: u.email,
       firstName: u.firstName,
       lastName: u.lastName,
       phone: u.phone ?? '',
+      department: u.department ?? '',
+      designation: u.designation ?? '',
+      managerName: u.managerName ?? '',
+      employmentType: u.employmentType ?? '',
+      joiningDate: u.joiningDate ? u.joiningDate.toISOString().slice(0, 10) : '',
       status: u.status,
       roles: u.roles.map((r) => r.role.name).join(', '),
       createdAt: u.createdAt.toISOString(),

@@ -199,6 +199,19 @@ router.post('/:id/restore', authorize(PERMISSIONS.USER_UPDATE), validate({ param
 
 /**
  * @openapi
+ * /users/{id}/resend-invite:
+ *   post:
+ *     tags: [Users]
+ *     summary: Re-send the invitation (new temp password, revokes old sessions)
+ *     parameters: [{ $ref: '#/components/parameters/IdParam' }]
+ *     responses:
+ *       200: { description: "{ email, tempPassword, emailQueued }" }
+ *       404: { $ref: '#/components/responses/NotFoundError' }
+ */
+router.post('/:id/resend-invite', authorize(PERMISSIONS.USER_UPDATE), validate({ params: v.idParam }), ctrl.resendInvite);
+
+/**
+ * @openapi
  * /users/{id}/roles:
  *   put:
  *     tags: [Users]

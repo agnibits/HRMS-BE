@@ -49,7 +49,7 @@ class AuthService {
     const valid = await verifyPassword(user.passwordHash, password);
     if (!valid) {
       await this.#registerFailedLogin(user);
-      await record({ action: AuditAction.LOGIN_FAILED, entity: 'auth', entityId: user.id, actorId: user.id, status: 'FAILURE' });
+      await record({ action: AuditAction.LOGIN_FAILED, entity: 'auth', entityId: user.id, actorId: user.id, companyId: user.companyId, status: 'FAILURE' });
       throw ApiError.unauthorized('Invalid email or password', { code: 'INVALID_CREDENTIALS' });
     }
 
@@ -125,9 +125,10 @@ class AuthService {
   }
 
   // ── Logout ───────────────────────────────────────────────────────────
-  async logout({ sessionId, accessJti }) {
+  async logout({ sessionId, accessJti, userId }) {
     if (sessionId) await revokeSession(sessionId, 'logout', accessJti);
-    await record({ action: AuditAction.LOGOUT, entity: 'auth', entityId: sessionId });
+    // Key the event to the user so it surfaces in that user's activity feed.
+    await record({ action: AuditAction.LOGOUT, entity: 'auth', entityId: userId ?? sessionId, metadata: { sessionId } });
   }
 
   async logoutAll(userId, { exceptSessionId } = {}) {
@@ -183,7 +184,16 @@ class AuthService {
       prisma.verificationToken.update({ where: { id: record_.id }, data: { usedAt: new Date() } }),
     ]);
     await revokeAllSessions(record_.userId, { reason: 'password_reset' });
-    await record({ action: AuditAction.PASSWORD_CHANGE, entity: 'auth', entityId: record_.userId });
+    // Unauthenticated flow — resolve companyId so the event is visible in the
+    // tenant's audit trail.
+    const owner = await prisma.user.findUnique({ where: { id: record_.userId }, select: { companyId: true } });
+    await record({
+      action: AuditAction.PASSWORD_CHANGE,
+      entity: 'auth',
+      entityId: record_.userId,
+      actorId: record_.userId,
+      companyId: owner?.companyId ?? null,
+    });
   }
 
   // ── Email verification ───────────────────────────────────────────────
@@ -316,7 +326,9 @@ class AuthService {
       where: { id: user.id },
       data: { lastLoginAt: new Date(), lastLoginIp: deviceInfo?.ip ?? null },
     });
-    await record({ action: AuditAction.LOGIN, entity: 'auth', entityId: user.id, actorId: user.id });
+    // companyId must be passed explicitly: login is unauthenticated, so there is
+    // no user in the request context yet for the audit record to infer it from.
+    await record({ action: AuditAction.LOGIN, entity: 'auth', entityId: user.id, actorId: user.id, companyId: user.companyId });
     return {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,

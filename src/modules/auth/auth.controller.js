@@ -52,7 +52,7 @@ export const refresh = asyncHandler(async (req, res) => {
 });
 
 export const logout = asyncHandler(async (req, res) => {
-  await authService.logout({ sessionId: req.user?.sessionId, accessJti: req.user?.jti });
+  await authService.logout({ sessionId: req.user?.sessionId, accessJti: req.user?.jti, userId: req.user?.id });
   res.clearCookie(refreshCookieName, { path: `${config.apiPrefix}/auth` });
   return ok(res, null, 'Logged out');
 });

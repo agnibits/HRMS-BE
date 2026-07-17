@@ -38,6 +38,10 @@ export const assignRoles = asyncHandler(async (req, res) => {
   return ok(res, await userService.assignRoles(req.params.id, req.body.roleIds, tenantScope(req.user)), 'Roles assigned');
 });
 
+export const resendInvite = asyncHandler(async (req, res) => {
+  return ok(res, await userService.resendInvite(req.params.id, tenantScope(req.user)), 'Invitation resent');
+});
+
 export const exportUsers = asyncHandler(async (req, res) => {
   const buffer = await userService.exportToExcel(req.validatedQuery ?? req.query, tenantScope(req.user));
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -50,4 +54,4 @@ export const importUsers = asyncHandler(async (req, res) => {
   return ok(res, result, 'Bulk import completed');
 });
 
-export default { list, getOne, create, update, updateProfile, remove, restore, assignRoles, exportUsers, importUsers };
+export default { list, getOne, create, update, updateProfile, remove, restore, assignRoles, resendInvite, exportUsers, importUsers };

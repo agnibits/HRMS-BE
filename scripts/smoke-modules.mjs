@@ -248,6 +248,47 @@ async function main() {
   const badRes = await fetch(`${api}/companies/${ownId}/logo`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: badLogo });
   rec('POST /companies/:id/logo (non-image → 400)', badRes.status === 400);
 
+  // ── #4 User HR fields ──
+  const hrUser = await post('/users', {
+    email: 'hr.fields@hrms.local', firstName: 'Hr', lastName: 'Fields',
+    password: 'Passw0rd!23', sendWelcomeEmail: false,
+    department: 'Engineering', designation: 'Senior Engineer',
+    manager: 'admin@hrms.local', joiningDate: '2026-01-15', employmentType: 'FULL_TIME',
+  });
+  const hrUserId = hrUser.j.data?.id;
+  rec('#4 POST /users (HR fields + employeeId auto-gen + managerName)',
+    hrUser.status === 201 && /^EMP-\d{3}$/.test(hrUser.j.data?.employeeId || '') &&
+    hrUser.j.data?.department === 'Engineering' && hrUser.j.data?.managerName === 'Super Admin' &&
+    hrUser.j.data?.employmentType === 'FULL_TIME' && !!hrUser.j.data?.joiningDate,
+    `empId=${hrUser.j.data?.employeeId} mgr=${hrUser.j.data?.managerName}`);
+  const hrUser2 = await post('/users', { email: 'hr.fields2@hrms.local', firstName: 'A', lastName: 'B', password: 'Passw0rd!23', sendWelcomeEmail: false });
+  rec('#4 employeeId sequential per company', /^EMP-\d{3}$/.test(hrUser2.j.data?.employeeId || '') && hrUser2.j.data?.employeeId !== hrUser.j.data?.employeeId,
+    `${hrUser.j.data?.employeeId} → ${hrUser2.j.data?.employeeId}`);
+  const hrUpd = await put(`/users/${hrUserId}`, { department: 'Sales', manager: null });
+  rec('#4 PUT /users (HR update, manager cleared)', hrUpd.status === 200 && hrUpd.j.data?.department === 'Sales' && hrUpd.j.data?.managerName === null);
+
+  // ── #6 resend-invite ──
+  const invite = await post(`/users/${hrUserId}/resend-invite`, {});
+  rec('#6 POST /users/:id/resend-invite', invite.status === 200 && !!invite.j.data?.tempPassword && invite.j.data?.email === 'hr.fields@hrms.local');
+  const inviteLogin = await post('/auth/login', { email: 'hr.fields@hrms.local', password: invite.j.data?.tempPassword });
+  rec('#6 resend-invite temp password works', inviteLogin.status === 200);
+
+  // ── #8 audit events ──
+  const roleList = await get('/roles?limit=20');
+  const empRole = (roleList.j.data || []).find((r) => r.name === 'EMPLOYEE');
+  const assign = await put(`/users/${hrUserId}/roles`, { roleIds: [empRole.id] });
+  rec('#8 PUT /users/:id/roles', assign.status === 200);
+  const acts = await get(`/audit-logs?entityId=${hrUserId}&limit=50`);
+  const actions = (acts.j.data || []).map((a) => a.action);
+  rec('#8 audit: CREATE + UPDATE logged', actions.includes('CREATE') && actions.includes('UPDATE'));
+  rec('#8 audit: ROLE_CHANGED logged', actions.includes('ROLE_CHANGED'));
+  rec('#8 audit: INVITE_RESENT logged', actions.includes('INVITE_RESENT'));
+  await fetch(`${api}/users/me/profile`, { method: 'PATCH', headers: H, body: JSON.stringify({ phone: '+911234567890' }) });
+  const myActs = await get(`/audit-logs?entityId=${userId}&limit=50`);
+  const myActions = (myActs.j.data || []).map((a) => a.action);
+  rec('#8 audit: PROFILE_UPDATED logged', myActions.includes('PROFILE_UPDATED'));
+  rec('#8 audit: LOGIN logged', myActions.includes('LOGIN'));
+
   // AI (no GROQ key in test → graceful degrade)
   const aiStatus = await get('/ai/status');
   rec('GET /ai/status (configured:false w/o key)', aiStatus.j.data?.configured === false);

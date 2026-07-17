@@ -35,6 +35,14 @@ enum EmployeeType {
   CONSULTANT
 }
 
+/// Employment type on the User record (HR profile fields surfaced in the app).
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+}
+
 enum Gender {
   MALE
   FEMALE
@@ -256,6 +264,15 @@ model User {
   avatarUrl    String?
   status       UserStatus @default(PENDING)
 
+  // ── HR profile (surfaced in the app; manager is denormalized id+name) ──
+  employeeId     String? // human-readable, e.g. EMP-001 (unique per company)
+  department     String?
+  designation    String?
+  managerId      String?
+  managerName    String?
+  joiningDate    DateTime?
+  employmentType EmploymentType?
+
   emailVerifiedAt DateTime?
   lastLoginAt     DateTime?
   lastLoginIp     String?
@@ -288,6 +305,7 @@ model User {
   updatedById String?
   deletedById String?
 
+  @@unique([companyId, employeeId])
   @@index([companyId])
   @@index([status])
   @@index([deletedAt])
