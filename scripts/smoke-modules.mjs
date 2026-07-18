@@ -69,6 +69,14 @@ async function main() {
   const depList = await get('/departments?page=1&limit=10&status=ACTIVE&search=eng');
   rec('GET /departments (filter+search+employeeCount)', depList.j.data?.[0]?.employeeCount === 0 && depList.j.meta.pagination.total >= 1);
 
+  // Department head = employee reference (headId → resolved headName)
+  const headDept = await post('/departments', { name: 'Ops', code: 'OPS', headId: userId, status: 'ACTIVE' });
+  rec('Dept head as employee ref (headId → headName)', headDept.status === 201 && headDept.j.data?.headId === userId && headDept.j.data?.headName === 'Super Admin', `head=${headDept.j.data?.headName}`);
+  const headClear = await put(`/departments/${headDept.j.data.id}`, { headId: null });
+  rec('Dept head cleared', headClear.status === 200 && headClear.j.data?.headId === null && headClear.j.data?.headName === null);
+  const headText = await post('/departments', { name: 'Legacy', code: 'LEG', head: 'Some Name' });
+  rec('Dept head legacy free-text still works', headText.status === 201 && headText.j.data?.headName === 'Some Name');
+
   // Designations (auto code + level)
   const desig = await post('/designations', { title: 'Senior Engineer', level: 5, department: 'Engineering' });
   rec('POST /designations (auto-code, dept resolve)', desig.status === 201, `code=${desig.j.data?.code}`);

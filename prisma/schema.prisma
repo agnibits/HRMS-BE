@@ -162,8 +162,9 @@ model Department {
   parentId    String?
   parent      Department?  @relation("DeptHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children    Department[] @relation("DeptHierarchy")
-  headId      String?
-  head        String?
+  headId      String? // references a User (an employee) who heads this department
+  headName    String? // denormalized display name of the head
+  head        String? // legacy free-text head (kept for backward compatibility)
   description String?
   status      EntityStatus @default(ACTIVE)
   isActive    Boolean      @default(true)

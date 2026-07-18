@@ -67,16 +67,52 @@ export const hrModules = [
     resource: 'departments',
     model: 'department',
     permissionPrefix: 'department',
-    searchFields: ['name', 'code', 'head'],
+    searchFields: ['name', 'code', 'headName'],
     sortFields: ['createdAt', 'name', 'code', 'status'],
     filters: { status: 'status' },
     include: { _count: { select: { employees: true } } },
     transform: ({ _count, ...r }) => ({ ...r, employeeCount: _count?.employees ?? 0 }),
+    // Head is an existing employee (headId → User); we denormalize headName.
+    // A raw `head` string is still accepted for backward compatibility.
+    mapInput: async (body) => {
+      const data = {};
+      for (const k of ['name', 'code', 'description', 'status']) if (body[k] !== undefined) data[k] = body[k];
+      if (body.headId !== undefined) {
+        if (!body.headId) {
+          data.headId = null;
+          data.headName = null;
+          data.head = null;
+        } else {
+          const u = await resolveUser(body.headId);
+          data.headId = u.id;
+          data.headName = u.name ?? null;
+          data.head = u.name ?? null;
+        }
+      } else if (body.head !== undefined) {
+        data.head = body.head;
+        data.headName = body.head;
+      }
+      return data;
+    },
     exportable: true,
     schemas: {
       list: listQuery({ status: z.enum(E.entity).optional() }),
-      create: z.object({ name: nstr, code: nstr, head: ostr, description: ostr, status: z.enum(E.entity).optional() }),
-      update: partial({ name: nstr, code: nstr, head: ostr, description: ostr, status: z.enum(E.entity) }),
+      create: z.object({
+        name: nstr,
+        code: nstr,
+        headId: z.string().nullable().optional(),
+        head: ostr, // legacy free-text fallback
+        description: ostr,
+        status: z.enum(E.entity).optional(),
+      }),
+      update: partial({
+        name: nstr,
+        code: nstr,
+        headId: z.string().nullable(),
+        head: ostr,
+        description: ostr,
+        status: z.enum(E.entity),
+      }),
     },
   }),
 
