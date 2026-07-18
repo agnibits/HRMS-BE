@@ -1,17 +1,9 @@
--- CreateEnum
-CREATE TYPE "EmploymentType" AS ENUM ('FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN');
-
--- AlterTable
-ALTER TABLE "users" ADD COLUMN     "departmentId" TEXT,
-ADD COLUMN     "departmentName" TEXT,
-ADD COLUMN     "designationId" TEXT,
-ADD COLUMN     "designationName" TEXT,
-ADD COLUMN     "employeeId" TEXT,
-ADD COLUMN     "employmentType" "EmploymentType",
-ADD COLUMN     "joiningDate" TIMESTAMP(3),
-ADD COLUMN     "managerId" TEXT,
-ADD COLUMN     "managerName" TEXT;
-
--- CreateIndex
-CREATE UNIQUE INDEX "users_companyId_employeeId_key" ON "users"("companyId", "employeeId");
-
+-- Transform the User HR reference fields from free text to FK id + denormalized
+-- name (idempotent; the enum/employeeId/manager/joiningDate/employmentType and
+-- the unique index were created by 20260106000000_user_hr_fields).
+ALTER TABLE "users" DROP COLUMN IF EXISTS "department";
+ALTER TABLE "users" DROP COLUMN IF EXISTS "designation";
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "departmentId" TEXT;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "departmentName" TEXT;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "designationId" TEXT;
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "designationName" TEXT;
