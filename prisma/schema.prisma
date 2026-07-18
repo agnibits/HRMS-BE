@@ -264,14 +264,17 @@ model User {
   avatarUrl    String?
   status       UserStatus @default(PENDING)
 
-  // ── HR profile (surfaced in the app; manager is denormalized id+name) ──
-  employeeId     String? // human-readable, e.g. EMP-001 (unique per company)
-  department     String?
-  designation    String?
-  managerId      String?
-  managerName    String?
-  joiningDate    DateTime?
-  employmentType EmploymentType?
+  // ── HR profile (surfaced in the app). Reference fields store the id plus a
+  //    denormalized name (departmentId→departmentName, etc.) for join-free reads.
+  employeeId      String? // human-readable, e.g. EMP-001 (unique per company)
+  departmentId    String?
+  departmentName  String?
+  designationId   String?
+  designationName String?
+  managerId       String?
+  managerName     String?
+  joiningDate     DateTime?
+  employmentType  EmploymentType?
 
   emailVerifiedAt DateTime?
   lastLoginAt     DateTime?

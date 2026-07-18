@@ -10,6 +10,9 @@ export const listQuerySchema = z.object({
   status: z.enum(['PENDING', 'ACTIVE', 'SUSPENDED', 'DISABLED']).optional(),
   companyId: z.string().optional(),
   roleId: z.string().optional(),
+  departmentId: z.string().optional(),
+  designationId: z.string().optional(),
+  employmentType: z.enum(['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN']).optional(),
 });
 
 export const EMPLOYMENT_TYPES = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN'];
@@ -18,10 +21,10 @@ export const EMPLOYMENT_TYPES = ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN']
 const hrFields = {
   // Human-readable code (e.g. EMP-001). Auto-generated per company if omitted.
   employeeId: z.string().trim().max(30).nullable().optional(),
-  department: z.string().trim().max(120).nullable().optional(),
-  designation: z.string().trim().max(120).nullable().optional(),
-  // Manager reference: user id or email — resolved to managerId + managerName.
-  manager: z.string().trim().nullable().optional(),
+  // FK references — resolved to *Name for join-free reads.
+  departmentId: z.string().trim().nullable().optional(),
+  designationId: z.string().trim().nullable().optional(),
+  managerId: z.string().trim().nullable().optional(),
   joiningDate: z.coerce.date().nullable().optional(),
   employmentType: z.enum(EMPLOYMENT_TYPES).nullable().optional(),
 };

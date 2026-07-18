@@ -248,24 +248,27 @@ async function main() {
   const badRes = await fetch(`${api}/companies/${ownId}/logo`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, body: badLogo });
   rec('POST /companies/:id/logo (non-image → 400)', badRes.status === 400);
 
-  // ── #4 User HR fields ──
+  // ── #4 User HR fields (FK-based: departmentId/designationId/managerId → names) ──
+  const deptId = dep.j.data.id, desigId = desig.j.data.id;
   const hrUser = await post('/users', {
     email: 'hr.fields@hrms.local', firstName: 'Hr', lastName: 'Fields',
     password: 'Passw0rd!23', sendWelcomeEmail: false,
-    department: 'Engineering', designation: 'Senior Engineer',
-    manager: 'admin@hrms.local', joiningDate: '2026-01-15', employmentType: 'FULL_TIME',
+    departmentId: deptId, designationId: desigId,
+    managerId: userId, joiningDate: '2026-01-15', employmentType: 'FULL_TIME',
   });
   const hrUserId = hrUser.j.data?.id;
-  rec('#4 POST /users (HR fields + employeeId auto-gen + managerName)',
+  rec('#4 POST /users (HR FK fields + employeeId + resolved names)',
     hrUser.status === 201 && /^EMP-\d{3}$/.test(hrUser.j.data?.employeeId || '') &&
-    hrUser.j.data?.department === 'Engineering' && hrUser.j.data?.managerName === 'Super Admin' &&
-    hrUser.j.data?.employmentType === 'FULL_TIME' && !!hrUser.j.data?.joiningDate,
-    `empId=${hrUser.j.data?.employeeId} mgr=${hrUser.j.data?.managerName}`);
+    hrUser.j.data?.departmentName === 'Engineering' && hrUser.j.data?.designationName === 'Senior Engineer' &&
+    hrUser.j.data?.managerName === 'Super Admin' && hrUser.j.data?.employmentType === 'FULL_TIME' && !!hrUser.j.data?.joiningDate,
+    `empId=${hrUser.j.data?.employeeId} dept=${hrUser.j.data?.departmentName} desig=${hrUser.j.data?.designationName}`);
   const hrUser2 = await post('/users', { email: 'hr.fields2@hrms.local', firstName: 'A', lastName: 'B', password: 'Passw0rd!23', sendWelcomeEmail: false });
   rec('#4 employeeId sequential per company', /^EMP-\d{3}$/.test(hrUser2.j.data?.employeeId || '') && hrUser2.j.data?.employeeId !== hrUser.j.data?.employeeId,
     `${hrUser.j.data?.employeeId} → ${hrUser2.j.data?.employeeId}`);
-  const hrUpd = await put(`/users/${hrUserId}`, { department: 'Sales', manager: null });
-  rec('#4 PUT /users (HR update, manager cleared)', hrUpd.status === 200 && hrUpd.j.data?.department === 'Sales' && hrUpd.j.data?.managerName === null);
+  const hrUpd = await put(`/users/${hrUserId}`, { designationId: null, managerId: null });
+  rec('#4 PUT /users (HR update, refs cleared)', hrUpd.status === 200 && hrUpd.j.data?.designationName === null && hrUpd.j.data?.managerName === null);
+  const hrFilter = await get(`/users?departmentId=${deptId}&employmentType=FULL_TIME`);
+  rec('#4 filters ?departmentId & ?employmentType', hrFilter.j.data?.some((u) => u.id === hrUserId));
 
   // ── #6 resend-invite ──
   const invite = await post(`/users/${hrUserId}/resend-invite`, {});

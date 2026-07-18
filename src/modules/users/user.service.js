@@ -22,8 +22,10 @@ const PUBLIC_SELECT = {
   companyId: true,
   // HR profile
   employeeId: true,
-  department: true,
-  designation: true,
+  departmentId: true,
+  departmentName: true,
+  designationId: true,
+  designationName: true,
   managerId: true,
   managerName: true,
   joiningDate: true,
@@ -56,28 +58,43 @@ class UserService {
 
   /**
    * Translate the HR profile fields from a request body into DB columns.
-   * `manager` (id or email) is denormalized into managerId + managerName; only
-   * keys present in the body are touched, so PATCH-style updates stay partial.
+   * Reference ids (departmentId/designationId/managerId) are resolved into a
+   * denormalized *Name for join-free reads. Only keys present in the body are
+   * touched, so PATCH-style updates stay partial.
    */
   async #hrPatch(data, companyId, { generateEmployeeId = false } = {}) {
     const patch = {};
-    for (const key of ['department', 'designation', 'joiningDate', 'employmentType']) {
+    for (const key of ['joiningDate', 'employmentType']) {
       if (data[key] !== undefined) patch[key] = data[key];
     }
-    if (data.manager !== undefined) {
-      if (!data.manager) {
-        patch.managerId = null;
-        patch.managerName = null;
-      } else {
-        const m = await resolveUser(data.manager);
-        patch.managerId = m.id;
-        patch.managerName = m.name;
-      }
+    if (data.departmentId !== undefined) {
+      patch.departmentId = data.departmentId || null;
+      patch.departmentName = await this.#refName('department', data.departmentId, companyId);
+    }
+    if (data.designationId !== undefined) {
+      patch.designationId = data.designationId || null;
+      patch.designationName = await this.#refName('designation', data.designationId, companyId);
+    }
+    if (data.managerId !== undefined) {
+      const m = data.managerId ? await resolveUser(data.managerId) : { id: null, name: null };
+      patch.managerId = m.id;
+      patch.managerName = m.name;
     }
     if (data.employeeId) patch.employeeId = data.employeeId;
     else if (generateEmployeeId) patch.employeeId = await this.#nextEmployeeId(companyId);
     else if (data.employeeId === null) patch.employeeId = null;
     return patch;
+  }
+
+  /** Look up a department/designation display name within the company. */
+  async #refName(kind, id, companyId) {
+    if (!id) return null;
+    if (kind === 'department') {
+      const d = await prisma.department.findFirst({ where: { id, companyId: companyId ?? undefined }, select: { name: true } });
+      return d?.name ?? null;
+    }
+    const d = await prisma.designation.findFirst({ where: { id, companyId: companyId ?? undefined }, select: { title: true } });
+    return d?.title ?? null;
   }
 
   /** Next human-readable employee code for a company, e.g. EMP-001. */
@@ -98,6 +115,9 @@ class UserService {
     const where = {};
     if (query.status) where.status = query.status;
     if (query.roleId) where.roles = { some: { roleId: query.roleId } };
+    if (query.departmentId) where.departmentId = query.departmentId;
+    if (query.designationId) where.designationId = query.designationId;
+    if (query.employmentType) where.employmentType = query.employmentType;
     // Super admin may optionally filter by company; tenants are locked to theirs.
     if (ctx.isSuperAdmin) {
       if (query.companyId) where.companyId = query.companyId;
@@ -168,8 +188,8 @@ class UserService {
     const before = await prisma.user.findFirst({ where: tenantWhere(ctx, { id, deletedAt: null }) });
     if (!before) throw ApiError.notFound('User not found', { code: 'USER_NOT_FOUND' });
 
-    // Strip the request-only HR aliases; #hrPatch maps them to real columns.
-    const { manager, employeeId, department, designation, joiningDate, employmentType, ...rest } = data;
+    // Strip request-only HR keys; #hrPatch maps them to the real columns/names.
+    const { employeeId, departmentId, designationId, managerId, joiningDate, employmentType, ...rest } = data;
     const patch = {
       ...rest,
       ...(await this.#hrPatch(data, before.companyId)),
@@ -295,8 +315,8 @@ class UserService {
       { header: 'First Name', key: 'firstName', width: 18 },
       { header: 'Last Name', key: 'lastName', width: 18 },
       { header: 'Phone', key: 'phone', width: 18 },
-      { header: 'Department', key: 'department', width: 20 },
-      { header: 'Designation', key: 'designation', width: 20 },
+      { header: 'Department', key: 'departmentName', width: 20 },
+      { header: 'Designation', key: 'designationName', width: 20 },
       { header: 'Manager', key: 'managerName', width: 20 },
       { header: 'Employment Type', key: 'employmentType', width: 16 },
       { header: 'Joining Date', key: 'joiningDate', width: 14 },
@@ -310,8 +330,8 @@ class UserService {
       firstName: u.firstName,
       lastName: u.lastName,
       phone: u.phone ?? '',
-      department: u.department ?? '',
-      designation: u.designation ?? '',
+      departmentName: u.departmentName ?? '',
+      designationName: u.designationName ?? '',
       managerName: u.managerName ?? '',
       employmentType: u.employmentType ?? '',
       joiningDate: u.joiningDate ? u.joiningDate.toISOString().slice(0, 10) : '',

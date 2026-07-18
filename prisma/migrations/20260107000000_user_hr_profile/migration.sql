@@ -2,8 +2,10 @@
 CREATE TYPE "EmploymentType" AS ENUM ('FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN');
 
 -- AlterTable
-ALTER TABLE "users" ADD COLUMN     "department" TEXT,
-ADD COLUMN     "designation" TEXT,
+ALTER TABLE "users" ADD COLUMN     "departmentId" TEXT,
+ADD COLUMN     "departmentName" TEXT,
+ADD COLUMN     "designationId" TEXT,
+ADD COLUMN     "designationName" TEXT,
 ADD COLUMN     "employeeId" TEXT,
 ADD COLUMN     "employmentType" "EmploymentType",
 ADD COLUMN     "joiningDate" TIMESTAMP(3),
