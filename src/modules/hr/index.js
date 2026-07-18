@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { defineCrudModule } from '../../core/crudModule.js';
+import { prisma } from '../../config/prisma.js';
 import { nanoid } from 'nanoid';
 import {
   listQuery,
@@ -93,6 +94,16 @@ export const hrModules = [
         data.headName = body.head;
       }
       return data;
+    },
+    // A department head is also a member of that department — reflect it on the
+    // user's profile so it shows up in their employee detail.
+    afterWrite: async (row) => {
+      if (row.headId) {
+        await prisma.user.updateMany({
+          where: { id: row.headId, companyId: row.companyId, deletedAt: null },
+          data: { departmentId: row.id, departmentName: row.name },
+        });
+      }
     },
     exportable: true,
     schemas: {

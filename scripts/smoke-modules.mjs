@@ -72,6 +72,8 @@ async function main() {
   // Department head = employee reference (headId → resolved headName)
   const headDept = await post('/departments', { name: 'Ops', code: 'OPS', headId: userId, status: 'ACTIVE' });
   rec('Dept head as employee ref (headId → headName)', headDept.status === 201 && headDept.j.data?.headId === userId && headDept.j.data?.headName === 'Super Admin', `head=${headDept.j.data?.headName}`);
+  const headMember = await get(`/users/${userId}`);
+  rec('Dept head auto-assigned as department member', headMember.j.data?.departmentId === headDept.j.data.id && headMember.j.data?.departmentName === 'Ops', `dept=${headMember.j.data?.departmentName}`);
   const headClear = await put(`/departments/${headDept.j.data.id}`, { headId: null });
   rec('Dept head cleared', headClear.status === 200 && headClear.j.data?.headId === null && headClear.j.data?.headName === null);
   const headText = await post('/departments', { name: 'Legacy', code: 'LEG', head: 'Some Name' });

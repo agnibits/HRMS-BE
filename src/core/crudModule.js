@@ -54,6 +54,7 @@ export function defineCrudModule(cfg) {
     schemas = {},
     beforeCreate,
     beforeUpdate,
+    afterWrite, // async (row, ctx, { action }) => void — side effects after create/update
     defaultSort,
     exportable = false,
     exportColumns,
@@ -104,6 +105,7 @@ export function defineCrudModule(cfg) {
       if (ctx.userId) data.createdById = ctx.userId;
       if (beforeCreate) data = await beforeCreate(data, ctx);
       const row = await repo.create(data, { include });
+      if (afterWrite) await afterWrite(row, ctx, { action: 'create' });
       await record({ action: AuditAction.CREATE, entity, entityId: row.id, actorId: ctx.userId });
       return transform(row);
     },
@@ -116,6 +118,7 @@ export function defineCrudModule(cfg) {
       if (ctx.userId) data.updatedById = ctx.userId;
       if (beforeUpdate) data = await beforeUpdate(data, ctx, before);
       const row = await repo.update(id, data, { include });
+      if (afterWrite) await afterWrite(row, ctx, { action: 'update' });
       await recordChange({ action: AuditAction.UPDATE, entity, entityId: id, before, after: row, actorId: ctx.userId });
       return transform(row);
     },
