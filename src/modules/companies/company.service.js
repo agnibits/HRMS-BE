@@ -97,9 +97,9 @@ export const companyService = {
     const dupName = await prisma.company.findFirst({ where: { name, deletedAt: null } });
     if (dupName) throw ApiError.conflict('A company with this name already exists', { code: 'COMPANY_NAME_TAKEN' });
 
+    // Email is unique per company; a fresh company is empty, so the admin email
+    // is always available here (the same person may admin multiple companies).
     const email = admin.email.toLowerCase();
-    const dupEmail = await prisma.user.findFirst({ where: { email } });
-    if (dupEmail) throw ApiError.conflict('A user with this admin email already exists', { code: 'EMAIL_TAKEN' });
 
     const adminRole = await prisma.role.findFirst({ where: { name: 'ADMIN', companyId: null } });
     if (!adminRole) throw ApiError.internal('ADMIN system role missing — run the seed', { code: 'ROLE_MISSING' });

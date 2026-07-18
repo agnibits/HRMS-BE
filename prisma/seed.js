@@ -44,8 +44,9 @@ async function main() {
 
   // 3. Super admin user
   const passwordHash = await argon2.hash(SUPER_ADMIN_PASSWORD, { type: argon2.argon2id });
+  // Email is unique per company now, so upsert on the composite key.
   const admin = await prisma.user.upsert({
-    where: { email: SUPER_ADMIN_EMAIL },
+    where: { companyId_email: { companyId: company.id, email: SUPER_ADMIN_EMAIL } },
     update: {},
     create: {
       email: SUPER_ADMIN_EMAIL,

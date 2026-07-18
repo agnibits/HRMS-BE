@@ -138,10 +138,11 @@ class UserService {
   }
 
   async create(data, ctx) {
-    const existing = await userRepository.findByEmail(data.email);
-    if (existing) throw ApiError.conflict('A user with this email already exists', { code: 'EMAIL_TAKEN' });
-
     const companyId = this.#targetCompany(ctx, data.companyId);
+    // Email is unique PER COMPANY — the same person can exist in other companies.
+    const existing = await userRepository.findByEmail(data.email, companyId ?? null);
+    if (existing) throw ApiError.conflict('A user with this email already exists in this company', { code: 'EMAIL_TAKEN' });
+
     if (data.roleIds?.length) {
       await this.#assertRolesExist(data.roleIds, companyId);
       await roleService.assertAssignable(data.roleIds, ctx); // block SUPER_ADMIN/platform roles for tenants
@@ -363,7 +364,7 @@ class UserService {
           sendWelcomeEmail: false,
         };
         const parsed = createUserSchema.parse(candidate);
-        const exists = await userRepository.findByEmail(parsed.email);
+        const exists = await userRepository.findByEmail(parsed.email, companyId ?? null);
         if (exists) {
           results.skipped += 1;
           continue;

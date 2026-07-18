@@ -254,6 +254,26 @@ async function main() {
   const superUsers = await get('/users?limit=100');
   rec('Super admin sees all tenants', superUsers.j.data.some((u) => u.id === demoUserId) && superUsers.j.data.some((u) => u.companyId === newCoId));
 
+  // ── EMAIL UNIQUE PER COMPANY (same person can exist in multiple companies) ──
+  const jpostH = (p, b, h) => fetch(`${api}${p}`, { method: 'POST', headers: h, body: JSON.stringify(b) }).then((r) => r.json().then((j) => ({ status: r.status, j })));
+  const dA = await post('/users', { email: 'dup@test.com', firstName: 'Dup', lastName: 'A', password: 'Passw0rd!11', sendWelcomeEmail: false });
+  rec('Email/company: create dup@test in company A → 201', dA.status === 201);
+  const dAdup = await post('/users', { email: 'dup@test.com', firstName: 'X', lastName: 'Y', password: 'Passw0rd!11', sendWelcomeEmail: false });
+  rec('Email/company: same email SAME company → 409', dAdup.status === 409 && dAdup.j.error?.code === 'EMAIL_TAKEN');
+  const dB = await jpostH('/users', { email: 'dup@test.com', firstName: 'Dup', lastName: 'B', password: 'Passw0rd!22', sendWelcomeEmail: false }, acme2H);
+  rec('Email/company: same email OTHER company → 201', dB.status === 201);
+  const loginA = await rawLogin({ email: 'dup@test.com', password: 'Passw0rd!11' });
+  rec('Email/company: login resolves company A by password', loginA.status === 200 && loginA.j.data?.user?.companyId === ownId);
+  const loginB = await rawLogin({ email: 'dup@test.com', password: 'Passw0rd!22' });
+  rec('Email/company: login resolves company B by password', loginB.status === 200 && loginB.j.data?.user?.companyId === newCoId);
+  // same email + same password in two companies → disambiguation flow
+  await post('/users', { email: 'multi@test.com', firstName: 'M', lastName: 'A', password: 'Same@1234', sendWelcomeEmail: false });
+  await jpostH('/users', { email: 'multi@test.com', firstName: 'M', lastName: 'B', password: 'Same@1234', sendWelcomeEmail: false }, acme2H);
+  const multiLogin = await rawLogin({ email: 'multi@test.com', password: 'Same@1234' });
+  rec('Email/company: same email+pw in 2 companies → multipleCompanies', multiLogin.status === 200 && multiLogin.j.data?.multipleCompanies === true && multiLogin.j.data?.companies?.length === 2);
+  const pickLogin = await rawLogin({ email: 'multi@test.com', password: 'Same@1234', companyId: newCoId });
+  rec('Email/company: disambiguate with companyId → 200', pickLogin.status === 200 && pickLogin.j.data?.user?.companyId === newCoId);
+
   // ── PRIVILEGE-ESCALATION PROTECTION (tenant can never become SUPER_ADMIN) ──
   const superRoles = await get('/roles?limit=100');
   const superRoleId = superRoles.j.data.find((r) => r.name === 'SUPER_ADMIN')?.id;

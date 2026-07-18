@@ -31,6 +31,11 @@ export const login = asyncHandler(async (req, res) => {
     return ok(res, { mfaRequired: true, mfaToken: result.mfaToken, userId: result.userId },
       'MFA verification required');
   }
+  // Same email+password in multiple companies — client must pick one and retry
+  // with { companyId }.
+  if (result.multipleCompanies) {
+    return ok(res, result, 'Select a company to continue');
+  }
   setRefreshCookie(res, result.refreshToken);
   return ok(res, result, 'Login successful');
 });

@@ -24,13 +24,40 @@ const LOCK_MINUTES = 15;
  */
 class AuthService {
   // ── Login ────────────────────────────────────────────────────────────
-  async login({ email, password, deviceInfo, portal = 'hrms' }) {
-    const user = await userRepository.findByEmailWithPermissions(email);
-
-    // Constant-ish behavior: run a dummy verify to reduce user enumeration timing.
-    if (!user) {
+  async login({ email, password, deviceInfo, portal = 'hrms', companyId }) {
+    // Email is unique per company, so a login may match candidates in several
+    // companies. Resolve the account by verifying the password against each.
+    const candidates = await userRepository.findAllByEmailWithPermissions(email);
+    if (!candidates.length) {
       await verifyPassword('$argon2id$v=19$m=19456,t=2,p=1$invalid$invalid', password).catch(() => {});
       throw ApiError.unauthorized('Invalid email or password', { code: 'INVALID_CREDENTIALS' });
+    }
+
+    const matches = [];
+    for (const c of candidates) {
+      if (await verifyPassword(c.passwordHash, password)) matches.push(c);
+    }
+    if (!matches.length) {
+      // Only meaningful lockout counting when the email maps to a single account.
+      if (candidates.length === 1) {
+        await this.#registerFailedLogin(candidates[0]);
+        await record({ action: AuditAction.LOGIN_FAILED, entity: 'auth', entityId: candidates[0].id, actorId: candidates[0].id, companyId: candidates[0].companyId, status: 'FAILURE' });
+      }
+      throw ApiError.unauthorized('Invalid email or password', { code: 'INVALID_CREDENTIALS' });
+    }
+
+    let user;
+    if (matches.length === 1) {
+      user = matches[0];
+    } else {
+      // Same email + password in multiple companies — disambiguate.
+      user = companyId ? matches.find((m) => m.companyId === companyId) : null;
+      if (!user) {
+        return {
+          multipleCompanies: true,
+          companies: matches.map((m) => ({ id: m.companyId, name: m.company?.name ?? null })),
+        };
+      }
     }
 
     if (user.lockedUntil && user.lockedUntil > new Date()) {
@@ -44,13 +71,6 @@ class AuthService {
     // Tenant-level suspension (platform SUPER_ADMIN bypasses so it can't self-lock).
     if (user.company?.status === 'SUSPENDED' && !user.roleNames.includes('SUPER_ADMIN')) {
       throw ApiError.forbidden('Your workspace is suspended. Contact Agnibits.', { code: 'COMPANY_SUSPENDED' });
-    }
-
-    const valid = await verifyPassword(user.passwordHash, password);
-    if (!valid) {
-      await this.#registerFailedLogin(user);
-      await record({ action: AuditAction.LOGIN_FAILED, entity: 'auth', entityId: user.id, actorId: user.id, companyId: user.companyId, status: 'FAILURE' });
-      throw ApiError.unauthorized('Invalid email or password', { code: 'INVALID_CREDENTIALS' });
     }
 
     // Portal separation: the Agnibits platform SUPER_ADMIN belongs to the master
@@ -168,22 +188,23 @@ class AuthService {
   }
 
   async forgotPassword({ email }) {
-    const user = await userRepository.findByEmail(email);
+    // Email may map to accounts in several companies — send a reset for each.
     // Always respond success to avoid user enumeration.
-    if (!user) return;
-
-    const token = randomToken(32);
-    await prisma.verificationToken.create({
-      data: {
-        userId: user.id,
-        type: 'PASSWORD_RESET',
-        tokenHash: sha256(token),
-        expiresAt: new Date(Date.now() + config.security.passwordResetExpiresMin * 60000),
-      },
-    });
-    const url = `${config.frontendUrl}/reset-password?token=${token}`;
-    const tpl = templates.passwordReset({ name: user.firstName, url });
-    await enqueueEmail({ to: user.email, ...tpl });
+    const users = await userRepository.findAllByEmail(email);
+    for (const user of users) {
+      const token = randomToken(32);
+      await prisma.verificationToken.create({
+        data: {
+          userId: user.id,
+          type: 'PASSWORD_RESET',
+          tokenHash: sha256(token),
+          expiresAt: new Date(Date.now() + config.security.passwordResetExpiresMin * 60000),
+        },
+      });
+      const url = `${config.frontendUrl}/reset-password?token=${token}`;
+      const tpl = templates.passwordReset({ name: user.firstName, url });
+      await enqueueEmail({ to: user.email, ...tpl });
+    }
   }
 
   async resetPassword({ token, newPassword }) {

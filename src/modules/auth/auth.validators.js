@@ -23,6 +23,8 @@ export const loginSchema = z.object({
   // the Agnibits master console. Enforces that platform admins and tenant users
   // use their own portal.
   portal: z.enum(['hrms', 'platform']).optional().default('hrms'),
+  // Disambiguates when the same email + password exists in multiple companies.
+  companyId: z.string().optional(),
 });
 
 export const mfaVerifySchema = z.object({
