@@ -196,6 +196,11 @@ async function main() {
   // A new hire can't be their own buddy → 422
   const selfBuddy = await post('/onboarding', { employee: wfEmp.j.data.id, startDate: '2026-07-01', buddy: wfEmp.j.data.id });
   rec('POST /onboarding (self-buddy rejected)', selfBuddy.status === 422 && selfBuddy.j.error?.code === 'BUDDY_IS_NEW_HIRE', `status=${selfBuddy.status} code=${selfBuddy.j.error?.code}`);
+  // status ↔ progress stay consistent
+  const onbDone = await post('/onboarding', { employee: wfEmp.j.data.id, startDate: '2026-07-01', status: 'COMPLETED' });
+  rec('POST /onboarding (COMPLETED pins progress=100)', onbDone.status === 201 && onbDone.j.data?.progress === 100, `progress=${onbDone.j.data?.progress}`);
+  const onbNew = await post('/onboarding', { employee: wfEmp.j.data.id, startDate: '2026-07-01' });
+  rec('POST /onboarding (default NOT_STARTED @ 0%)', onbNew.status === 201 && onbNew.j.data?.status === 'NOT_STARTED' && onbNew.j.data?.progress === 0, `status=${onbNew.j.data?.status} progress=${onbNew.j.data?.progress}`);
   const perf = await post('/performance-reviews', { employee: userId, reviewer: 'admin@hrms.local', cycle: 'Q3', score: 4.5 });
   rec('POST /performance-reviews (reviewerName resolved)', perf.status === 201 && perf.j.data.reviewerName === 'Super Admin');
 

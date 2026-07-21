@@ -573,6 +573,15 @@ export const hrModules = [
         data.manager = hire?.managerId ?? null;
         data.managerName = hire?.managerName ?? null;
       }
+      // Keep status and progress consistent so a record can't say "COMPLETED"
+      // yet 0%. Terminal statuses pin progress; a fresh onboarding with no
+      // status defaults to NOT_STARTED at 0%.
+      if (data.status === 'COMPLETED') data.progress = 100;
+      else if (data.status === 'NOT_STARTED') data.progress = 0;
+      else if (data.status === undefined && before === undefined && data.progress === undefined) {
+        data.status = 'NOT_STARTED';
+        data.progress = 0;
+      }
       return data;
     },
     exportable: true,
