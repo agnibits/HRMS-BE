@@ -201,6 +201,32 @@ async function main() {
   rec('POST /onboarding (COMPLETED pins progress=100)', onbDone.status === 201 && onbDone.j.data?.progress === 100, `progress=${onbDone.j.data?.progress}`);
   const onbNew = await post('/onboarding', { employee: wfEmp.j.data.id, startDate: '2026-07-01' });
   rec('POST /onboarding (default NOT_STARTED @ 0%)', onbNew.status === 201 && onbNew.j.data?.status === 'NOT_STARTED' && onbNew.j.data?.progress === 0, `status=${onbNew.j.data?.status} progress=${onbNew.j.data?.progress}`);
+
+  // ── Onboarding checklist: default tasks seed, ticking drives progress+status ──
+  const patch = (path, body) => fetch(`${api}${path}`, { method: 'PATCH', headers: H, body: JSON.stringify(body) }).then((r) => r.json().then((j) => ({ status: r.status, j })));
+  const onbId = onbNew.j.data.id;
+  const seeded = await get(`/onboarding/${onbId}`);
+  rec('Onboarding seeded with default checklist', seeded.j.data?.tasksTotal === 6 && seeded.j.data?.tasksDone === 0 && Array.isArray(seeded.j.data?.tasks), `total=${seeded.j.data?.tasksTotal}`);
+  const tasks = seeded.j.data.tasks;
+  // tick 3 of 6 → 50% IN_PROGRESS
+  await patch(`/onboarding/${onbId}/tasks/${tasks[0].id}`, { done: true });
+  await patch(`/onboarding/${onbId}/tasks/${tasks[1].id}`, { done: true });
+  const half = await patch(`/onboarding/${onbId}/tasks/${tasks[2].id}`, { done: true });
+  rec('Ticking tasks drives progress+status (3/6 → 50% IN_PROGRESS)', half.j.data?.progress === 50 && half.j.data?.status === 'IN_PROGRESS', `progress=${half.j.data?.progress} status=${half.j.data?.status}`);
+  // add a custom task → total 7
+  const added = await post(`/onboarding/${onbId}/tasks`, { title: 'Sign NDA' });
+  rec('Add custom checklist item', added.status === 201 && added.j.data?.tasksTotal === 7, `total=${added.j.data?.tasksTotal}`);
+  // tick the remaining 4 → 100% COMPLETED
+  const remaining = added.j.data.tasks.filter((t) => !t.done);
+  let last;
+  for (const t of remaining) last = await patch(`/onboarding/${onbId}/tasks/${t.id}`, { done: true });
+  rec('All tasks done → 100% COMPLETED', last.j.data?.progress === 100 && last.j.data?.status === 'COMPLETED', `progress=${last.j.data?.progress} status=${last.j.data?.status}`);
+  // untick one → back to IN_PROGRESS
+  const unticked = await patch(`/onboarding/${onbId}/tasks/${tasks[0].id}`, { done: false });
+  rec('Unticking reverts status', unticked.j.data?.status === 'IN_PROGRESS' && unticked.j.data?.progress < 100, `progress=${unticked.j.data?.progress} status=${unticked.j.data?.status}`);
+  // delete a task → total drops
+  const delTask = await fetch(`${api}/onboarding/${onbId}/tasks/${added.j.data.tasks.find((t) => t.title === 'Sign NDA').id}`, { method: 'DELETE', headers: H }).then((r) => r.json().then((j) => ({ status: r.status, j })));
+  rec('Delete checklist item', delTask.status === 200 && delTask.j.data?.tasksTotal === 6, `total=${delTask.j.data?.tasksTotal}`);
   const perf = await post('/performance-reviews', { employee: userId, reviewer: 'admin@hrms.local', cycle: 'Q3', score: 4.5 });
   rec('POST /performance-reviews (reviewerName resolved)', perf.status === 201 && perf.j.data.reviewerName === 'Super Admin');
 

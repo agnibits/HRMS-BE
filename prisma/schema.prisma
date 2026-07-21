@@ -800,6 +800,7 @@ model Onboarding {
   status       OnboardingStatus @default(NOT_STARTED)
   progress     Int              @default(0)
   notes        String?
+  tasks        OnboardingTask[]
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
   deletedAt    DateTime?
@@ -811,6 +812,25 @@ model Onboarding {
   @@index([status])
   @@index([deletedAt])
   @@map("onboardings")
+}
+
+// A single checklist item on an onboarding (e.g. "Allocate laptop"). Ticking
+// items drives the onboarding's progress% and auto-advances its status.
+model OnboardingTask {
+  id           String     @id @default(cuid())
+  companyId    String
+  onboardingId String
+  onboarding   Onboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+  title        String
+  done         Boolean    @default(false)
+  position     Int        @default(0)
+  completedAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([onboardingId])
+  @@index([companyId])
+  @@map("onboarding_tasks")
 }
 
 model PerformanceReview {

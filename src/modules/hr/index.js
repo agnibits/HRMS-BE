@@ -19,6 +19,7 @@ import {
 } from './helpers.js';
 import { computeBalances, assertBalance } from './leaveBalance.js';
 import { transitionLeave, notifyManagerOnApply, pendingApprovalQueue } from './leaveWorkflow.js';
+import { seedDefaultTasks, recomputeProgress, registerTaskRoutes } from './onboardingTasks.js';
 import { paginated } from '../../utils/ApiResponse.js';
 
 /**
@@ -541,6 +542,32 @@ export const hrModules = [
     searchFields: ['employeeName', 'buddy', 'manager'],
     sortFields: ['createdAt', 'startDate', 'status', 'progress'],
     filters: { status: 'status' },
+    include: { tasks: { orderBy: { position: 'asc' } } },
+    transform: ({ tasks = [], ...r }) => ({
+      ...r,
+      tasks,
+      tasksTotal: tasks.length,
+      tasksDone: tasks.filter((t) => t.done).length,
+    }),
+    // A fresh onboarding starts with the default checklist; progress/status then
+    // follow the ticked items (see onboardingTasks.js).
+    afterWrite: async (row, _ctx, { action }) => {
+      if (action === 'create') {
+        await seedDefaultTasks(row);
+        await recomputeProgress(row.id);
+      }
+    },
+    extendRouter: (router, helpers) => registerTaskRoutes(router, helpers),
+    exportColumns: [
+      { header: 'Employee', key: 'employeeName', width: 24 },
+      { header: 'Start Date', key: 'startDate', width: 16 },
+      { header: 'Buddy', key: 'buddyName', width: 24 },
+      { header: 'Reporting Manager', key: 'managerName', width: 24 },
+      { header: 'Status', key: 'status', width: 14 },
+      { header: 'Progress %', key: 'progress', width: 12 },
+      { header: 'Tasks Done', key: 'tasksDone', width: 12 },
+      { header: 'Tasks Total', key: 'tasksTotal', width: 12 },
+    ],
     mapInput: async (body, _ctx, before) => {
       const emp = await withEmployee(body);
       const data = {
