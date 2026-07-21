@@ -186,8 +186,13 @@ async function main() {
   rec('POST /expenses (employeeName)', exp.status === 201 && !!exp.j.data.employeeName);
   const tkt = await post('/tickets', { subject: 'Laptop slow', requester: userId, assignee: 'admin@hrms.local', priority: 'HIGH' });
   rec('POST /tickets (requesterName + assigneeName)', tkt.status === 201 && !!tkt.j.data.requesterName && tkt.j.data.assigneeName === 'Super Admin');
-  const onb = await post('/onboarding', { employee: userId, startDate: '2026-07-01', progress: 50, buddy: userId, manager: 'admin@hrms.local' });
-  rec('POST /onboarding (buddy/manager names resolved)', onb.status === 201 && onb.j.data.progress === 50 && onb.j.data.buddyName === 'Super Admin' && onb.j.data.managerName === 'Super Admin', `buddy=${onb.j.data?.buddyName} mgr=${onb.j.data?.managerName}`);
+  // New hire wfEmp has manager 'Wf Mgr'. Onboarding must INHERIT that from the
+  // employee record (single source of truth) — even though we pass a different
+  // manager here, the inherited one wins. Buddy is still onboarding-specific.
+  const onb = await post('/onboarding', { employee: wfEmp.j.data.id, startDate: '2026-07-01', progress: 50, buddy: userId, manager: 'admin@hrms.local' });
+  rec('POST /onboarding (manager inherited from new hire, buddy resolved)',
+    onb.status === 201 && onb.j.data.progress === 50 && onb.j.data.buddyName === 'Super Admin' && onb.j.data.managerName === 'Wf Mgr',
+    `buddy=${onb.j.data?.buddyName} mgr=${onb.j.data?.managerName} (expected Wf Mgr, not Super Admin)`);
   const perf = await post('/performance-reviews', { employee: userId, reviewer: 'admin@hrms.local', cycle: 'Q3', score: 4.5 });
   rec('POST /performance-reviews (reviewerName resolved)', perf.status === 201 && perf.j.data.reviewerName === 'Super Admin');
 

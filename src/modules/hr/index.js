@@ -541,23 +541,31 @@ export const hrModules = [
     sortFields: ['createdAt', 'startDate', 'status', 'progress'],
     filters: { status: 'status' },
     mapInput: async (body) => {
+      const emp = await withEmployee(body);
       const data = {
-        ...(await withEmployee(body)),
+        ...emp,
         startDate: body.startDate,
         status: body.status,
         progress: body.progress,
         notes: body.notes,
       };
-      // Resolve buddy/manager (user id or email) → stored name, like employeeName.
+      // Buddy is onboarding-specific (a peer helper) — resolve id/email → name.
       if (body.buddy !== undefined) {
         const u = await resolveUser(body.buddy);
         data.buddy = u.id;
         data.buddyName = u.name;
       }
-      if (body.manager !== undefined) {
-        const u = await resolveUser(body.manager);
-        data.manager = u.id;
-        data.managerName = u.name;
+      // Reporting manager is NOT entered here. It's the org relationship that
+      // lives on the employee record (User.managerId) — the single source of
+      // truth. Whenever the new hire is (re)selected we inherit their manager,
+      // so onboarding always mirrors the org chart and can never diverge.
+      if (emp.employeeId) {
+        const hire = await prisma.user.findUnique({
+          where: { id: emp.employeeId },
+          select: { managerId: true, managerName: true },
+        });
+        data.manager = hire?.managerId ?? null;
+        data.managerName = hire?.managerName ?? null;
       }
       return data;
     },
@@ -568,7 +576,6 @@ export const hrModules = [
         employee: nstr,
         startDate: isoDate,
         buddy: ostr,
-        manager: ostr,
         status: z.enum(E.onboarding).optional(),
         progress: z.coerce.number().int().min(0).max(100).optional(),
         notes: ostr,
@@ -577,7 +584,6 @@ export const hrModules = [
         employee: z.string(),
         startDate: isoDate,
         buddy: ostr,
-        manager: ostr,
         status: z.enum(E.onboarding),
         progress: z.coerce.number().int().min(0).max(100),
         notes: ostr,
