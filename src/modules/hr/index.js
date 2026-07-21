@@ -62,6 +62,22 @@ const withEmployee = async (raw) => {
   return { employeeId: u.id, employeeName: u.name };
 };
 
+// Live employee count for departments/designations. Employees ARE Users (the
+// User model carries departmentId/designationId denormalized), so we count
+// Users by that reference — NOT the legacy Employee table, which isn't synced.
+// One batched groupBy for the whole page; sets employeeCount on each row.
+const withEmployeeCount = (field) => async (rows, ctx) => {
+  const ids = rows.map((r) => r.id);
+  if (!ids.length) return rows;
+  const groups = await prisma.user.groupBy({
+    by: [field],
+    where: { companyId: ctx.companyId ?? undefined, deletedAt: null, [field]: { in: ids } },
+    _count: { _all: true },
+  });
+  const counts = new Map(groups.map((g) => [g[field], g._count._all]));
+  return rows.map((r) => ({ ...r, employeeCount: counts.get(r.id) ?? 0 }));
+};
+
 export const hrModules = [
   // ─────────────────────────── Organization ─────────────────────────────
   defineCrudModule({
@@ -71,8 +87,8 @@ export const hrModules = [
     searchFields: ['name', 'code', 'headName'],
     sortFields: ['createdAt', 'name', 'code', 'status'],
     filters: { status: 'status' },
-    include: { _count: { select: { employees: true } } },
-    transform: ({ _count, ...r }) => ({ ...r, employeeCount: _count?.employees ?? 0 }),
+    transform: (r) => ({ ...r, employeeCount: 0 }),
+    enrich: withEmployeeCount('departmentId'),
     // Head is an existing employee (headId → User); we denormalize headName.
     // A raw `head` string is still accepted for backward compatibility.
     mapInput: async (body) => {
@@ -134,12 +150,13 @@ export const hrModules = [
     searchFields: ['title', 'code'],
     sortFields: ['createdAt', 'title', 'level', 'status'],
     filters: { departmentId: 'departmentId' },
-    include: { department: { select: { name: true } }, _count: { select: { employees: true } } },
-    transform: ({ _count, department, ...r }) => ({
+    include: { department: { select: { name: true } } },
+    transform: ({ department, ...r }) => ({
       ...r,
       departmentName: department?.name ?? null,
-      employeeCount: _count?.employees ?? 0,
+      employeeCount: 0,
     }),
+    enrich: withEmployeeCount('designationId'),
     mapInput: async (body, ctx) => {
       const data = {
         title: body.title,

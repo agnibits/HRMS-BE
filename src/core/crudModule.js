@@ -50,6 +50,7 @@ export function defineCrudModule(cfg) {
     filters = {},
     include,
     transform = (x) => x,
+    enrich, // async (shapedRows, ctx) => shapedRows — batched post-shape enrichment (e.g. live counts)
     mapInput = (body) => body,
     schemas = {},
     beforeCreate,
@@ -88,7 +89,9 @@ export function defineCrudModule(cfg) {
     const where = companyScoped && ctx.companyId ? { id, companyId: ctx.companyId } : { id };
     const row = await repo.findOne(where, { include });
     if (!row) throw ApiError.notFound(`${entity} not found`, { code: `${permissionPrefix.toUpperCase()}_NOT_FOUND` });
-    return transform(row);
+    let shaped = transform(row);
+    if (enrich) [shaped] = await enrich([shaped], ctx);
+    return shaped;
   }
 
   // ── Service-level operations (reusable/testable) ──────────────────────
@@ -96,7 +99,9 @@ export function defineCrudModule(cfg) {
     async list(query, ctx) {
       const where = buildWhere(query, ctx);
       const { items, pagination } = await repo.paginate(query, where, { include });
-      return { items: items.map(transform), pagination };
+      let shaped = items.map(transform);
+      if (enrich) shaped = await enrich(shaped, ctx);
+      return { items: shaped, pagination };
     },
     get: (id, ctx) => fetchShaped(id, ctx),
     async create(body, ctx) {
@@ -147,7 +152,8 @@ export function defineCrudModule(cfg) {
   const exportXlsx = asyncHandler(async (req, res) => {
     const ctx = ctxOf(req);
     const where = buildWhere(req.validatedQuery ?? req.query, ctx);
-    const rows = (await repo.findMany(where, { include, take: 10000, orderBy: defaultSort ?? { createdAt: 'desc' } })).map(transform);
+    let rows = (await repo.findMany(where, { include, take: 10000, orderBy: defaultSort ?? { createdAt: 'desc' } })).map(transform);
+    if (enrich) rows = await enrich(rows, ctx);
     const columns = exportColumns ?? Object.keys(rows[0] ?? { id: null }).map((k) => ({ header: k, key: k, width: 20 }));
     const buffer = await buildWorkbookBuffer({ sheetName: resource, columns, rows });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

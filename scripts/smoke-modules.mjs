@@ -346,6 +346,11 @@ async function main() {
     hrUser.j.data?.departmentName === 'Engineering' && hrUser.j.data?.designationName === 'Senior Engineer' &&
     hrUser.j.data?.managerName === 'Super Admin' && hrUser.j.data?.employmentType === 'FULL_TIME' && !!hrUser.j.data?.joiningDate,
     `empId=${hrUser.j.data?.employeeId} dept=${hrUser.j.data?.departmentName} desig=${hrUser.j.data?.designationName}`);
+  // employeeCount must count USERS assigned to the dept/designation, NOT the legacy Employee table
+  const depCount = await get(`/departments/${deptId}`);
+  rec('Dept employeeCount reflects assigned users', (depCount.j.data?.employeeCount ?? 0) >= 1, `count=${depCount.j.data?.employeeCount}`);
+  const desigCount = await get(`/designations/${desigId}`);
+  rec('Designation employeeCount reflects assigned users', (desigCount.j.data?.employeeCount ?? 0) >= 1, `count=${desigCount.j.data?.employeeCount}`);
   const hrUser2 = await post('/users', { email: 'hr.fields2@hrms.local', firstName: 'A', lastName: 'B', password: 'Passw0rd!23', sendWelcomeEmail: false });
   rec('#4 employeeId sequential per company', /^EMP-\d{3}$/.test(hrUser2.j.data?.employeeId || '') && hrUser2.j.data?.employeeId !== hrUser.j.data?.employeeId,
     `${hrUser.j.data?.employeeId} → ${hrUser2.j.data?.employeeId}`);
